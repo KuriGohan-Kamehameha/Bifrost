@@ -1,0 +1,436 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="@color/bifrost_bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="12dp"
+        android:baselineAligned="false">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="3"
+            android:orientation="vertical"
+            android:layout_marginEnd="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="BIFROST"
+                android:textColor="@color/bifrost_text"
+                android:textSize="32sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1"
+                android:layout_marginBottom="4dp"
+                android:shadowColor="@color/bifrost_glow_purple"
+                android:shadowDx="0"
+                android:shadowDy="0"
+                android:shadowRadius="20"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:ellipsize="none" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="LED BRIDGE SYSTEM FOR AYN THOR"
+                android:textColor="@color/bifrost_text_secondary"
+                android:textSize="11sp"
+                android:letterSpacing="0.15" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="7"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginStart="8dp">
+
+            <Spinner
+                android:id="@+id/presetSpinner"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="3"
+                android:background="@drawable/bifrost_spinner_modern"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/savePresetButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="6dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:padding="0dp"
+                app:icon="@android:drawable/ic_menu_add"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconSize="24dp"
+                app:iconTint="@color/bifrost_icon"
+                android:backgroundTint="@color/bifrost_surface"
+                app:cornerRadius="10dp"
+                app:strokeWidth="1dp"
+                app:strokeColor="@color/bifrost_accent" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/modifyPresetButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="6dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:padding="0dp"
+                app:icon="@android:drawable/ic_menu_save"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconSize="24dp"
+                app:iconTint="@color/bifrost_icon"
+                android:backgroundTint="@color/bifrost_surface"
+                app:cornerRadius="10dp"
+                app:strokeWidth="1dp"
+                app:strokeColor="@color/bifrost_accent" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/deletePresetButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="6dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:padding="0dp"
+                app:icon="@android:drawable/ic_menu_delete"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconSize="24dp"
+                app:iconTint="@color/bifrost_icon"
+                android:backgroundTint="@color/bifrost_surface"
+                app:cornerRadius="10dp"
+                app:strokeWidth="1dp"
+                app:strokeColor="@color/bifrost_accent" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <ScrollView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:scrollbars="none"
+            android:overScrollMode="ifContentScrolls">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginEnd="8dp">
+
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="16dp"
+                    app:cardBackgroundColor="@color/bifrost_card"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="0dp"
+                    android:outlineAmbientShadowColor="@color/bifrost_glow_purple"
+                    android:outlineSpotShadowColor="@color/bifrost_glow_purple">
+
+                    <LinearLayout
+                        android:id="@+id/systemStatusContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:padding="20dp"
+                        android:background="@drawable/card_glow_bg">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="CALL HEIMDALL"
+                                android:textColor="@color/bifrost_text"
+                                android:textSize="16sp"
+                                android:letterSpacing="0.05"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Toggle LED synchronization"
+                                android:textColor="@color/bifrost_text_secondary"
+                                android:textSize="11sp"
+                                android:layout_marginTop="2dp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/serviceToggle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            app:thumbTint="@color/bifrost_accent_light"
+                            app:trackTint="@color/bifrost_surface" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/modeCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="16dp"
+                    app:cardBackgroundColor="@color/bifrost_card"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="0dp"
+                    android:outlineAmbientShadowColor="@color/bifrost_glow_cyan"
+                    android:outlineSpotShadowColor="@color/bifrost_glow_cyan">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="20dp"
+                        android:background="@drawable/card_glow_bg">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="ANIMATION MODE"
+                            android:textColor="@color/bifrost_text"
+                            android:textSize="12sp"
+                            android:letterSpacing="0.08"
+                            android:textStyle="bold"
+                            android:layout_marginBottom="12dp" />
+
+                        <Spinner
+                            android:id="@+id/animationSpinner"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bifrost_spinner_modern"
+                            android:layout_marginBottom="4dp"
+                            android:paddingStart="16dp"
+                            android:paddingEnd="16dp"
+                            android:paddingTop="12dp"
+                            android:paddingBottom="12dp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+            </LinearLayout>
+        </ScrollView>
+
+        <ScrollView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:scrollbars="none"
+            android:overScrollMode="ifContentScrolls">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginStart="8dp">
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/colorCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="16dp"
+                    app:cardBackgroundColor="@color/bifrost_card"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="0dp"
+                    android:outlineAmbientShadowColor="@color/bifrost_glow_pink"
+                    android:outlineSpotShadowColor="@color/bifrost_glow_pink">
+
+                    <LinearLayout
+                        android:orientation="vertical"
+                        android:padding="20dp"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/card_glow_bg">
+
+                        <TextView
+                            android:text="COLOR &amp; INTENSITY"
+                            android:textColor="@color/bifrost_text"
+                            android:textSize="12sp"
+                            android:letterSpacing="0.08"
+                            android:textStyle="bold"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="16dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/colorButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="48dp"
+                            android:text="SELECT COLOR"
+                            android:backgroundTint="@color/bifrost_surface"
+                            android:textColor="@color/bifrost_text"
+                            android:textSize="12sp"
+                            android:letterSpacing="0.05"
+                            app:cornerRadius="12dp"
+                            app:strokeWidth="1dp"
+                            app:strokeColor="@color/bifrost_accent"
+                            android:layout_marginBottom="20dp" />
+
+                        <TextView
+                            android:text="BRIGHTNESS"
+                            android:textColor="@color/bifrost_text_secondary"
+                            android:textSize="10sp"
+                            android:letterSpacing="0.1"
+                            android:layout_marginBottom="8dp"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                        <SeekBar
+                            android:id="@+id/brightnessSeekBar"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            style="@style/BifrostSeekBar" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/animationCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="16dp"
+                    app:cardBackgroundColor="@color/bifrost_card"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="0dp"
+                    android:outlineAmbientShadowColor="@color/bifrost_glow_cyan"
+                    android:outlineSpotShadowColor="@color/bifrost_glow_cyan">
+
+                    <LinearLayout
+                        android:padding="20dp"
+                        android:orientation="vertical"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/card_glow_bg">
+
+                        <TextView
+                            android:text="ANIMATION PARAMETERS"
+                            android:textColor="@color/bifrost_text"
+                            android:textSize="12sp"
+                            android:letterSpacing="0.08"
+                            android:textStyle="bold"
+                            android:layout_marginBottom="16dp"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                        <TextView
+                            android:id="@+id/speedLabel"
+                            android:text="REACTIVITY"
+                            android:textColor="@color/bifrost_text_secondary"
+                            android:textSize="10sp"
+                            android:letterSpacing="0.1"
+                            android:layout_marginBottom="8dp"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                        <SeekBar
+                            android:id="@+id/speedSeekBar"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="16dp"
+                            style="@style/BifrostSeekBar" />
+
+                        <TextView
+                            android:id="@+id/smoothnessLabel"
+                            android:text="SMOOTHNESS"
+                            android:textColor="@color/bifrost_text_secondary"
+                            android:textSize="10sp"
+                            android:letterSpacing="0.1"
+                            android:layout_marginBottom="8dp"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                        <SeekBar
+                            android:id="@+id/smoothnessSeekBar"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="16dp"
+                            style="@style/BifrostSeekBar" />
+
+                        <TextView
+                            android:id="@+id/sensitivityLabel"
+                            android:text="AUDIO SENSITIVITY"
+                            android:textColor="@color/bifrost_text_secondary"
+                            android:textSize="10sp"
+                            android:letterSpacing="0.1"
+                            android:layout_marginBottom="8dp"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                        <SeekBar
+                            android:id="@+id/sensitivitySeekBar"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            style="@style/BifrostSeekBar" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/performanceCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="16dp"
+                    app:cardBackgroundColor="@color/bifrost_card"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="0dp"
+                    android:outlineAmbientShadowColor="@color/bifrost_glow_cyan"
+                    android:outlineSpotShadowColor="@color/bifrost_glow_cyan">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="20dp"
+                        android:background="@drawable/card_glow_bg">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="PERFORMANCE PROFILE"
+                            android:textColor="@color/bifrost_text"
+                            android:textSize="12sp"
+                            android:letterSpacing="0.08"
+                            android:textStyle="bold"
+                            android:layout_marginBottom="12dp" />
+
+                        <Spinner
+                            android:id="@+id/profileSpinner"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bifrost_spinner_modern"
+                            android:paddingStart="16dp"
+                            android:paddingEnd="16dp"
+                            android:paddingTop="12dp"
+                            android:paddingBottom="12dp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+            </LinearLayout>
+        </ScrollView>
+
+    </LinearLayout>
+</LinearLayout>
