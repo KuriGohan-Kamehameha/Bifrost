@@ -1,6 +1,6 @@
 # Bifrost -- LED Controller for the AYN Thor
 
-Bifrost is a custom LED controller for the **AYN Thor** handheld.\
+Bifrost is a custom LED controller for the **AYN Thor** handheld (and might work for other AYN handhelds).\
 It provides a collection of LED animations that can run in the
 background, including:
 
