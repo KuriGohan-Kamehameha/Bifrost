@@ -2,14 +2,16 @@ package com.moonbench.bifrost.tools
 
 import android.os.IBinder
 import android.os.Parcel
-import java.util.concurrent.Executors
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 class LedController {
     private val pServerBinder: IBinder?
-    private val commandExecutor = Executors.newSingleThreadExecutor()
-    private val commandQueue = LinkedBlockingQueue<String>(10)
+    private val lock = ReentrantLock()
+
+    private var lastCommand: String? = null
+    private var lastExecuteTime = 0L
+    private val minExecuteInterval = 8L
 
     init {
         pServerBinder = try {
@@ -48,11 +50,7 @@ class LedController {
 
         if (commands.isNotEmpty()) {
             val command = commands.joinToString(" && ")
-            if (!commandQueue.offer(command)) {
-                commandQueue.poll()
-                commandQueue.offer(command)
-            }
-            executeCommandAsync()
+            executeCommandDirect(command)
         }
     }
 
@@ -65,44 +63,37 @@ class LedController {
             "echo 2-0:0:0:$b > /sys/class/sn3112r/led/brightness"
         )
         val command = commands.joinToString(" && ")
-        if (!commandQueue.offer(command)) {
-            commandQueue.poll()
-            commandQueue.offer(command)
-        }
-        executeCommandAsync()
+        executeCommandDirect(command)
     }
 
-    private fun executeCommandAsync() {
-        commandExecutor.execute {
-            commandQueue.poll()?.let { command ->
-                executeCommand(command)
+    private fun executeCommandDirect(command: String) {
+        lock.withLock {
+            val now = System.currentTimeMillis()
+
+            if (command == lastCommand && now - lastExecuteTime < minExecuteInterval) {
+                return
             }
-        }
-    }
 
-    private fun executeCommand(command: String) {
-        pServerBinder?.let { binder ->
-            val data = Parcel.obtain()
-            val reply = Parcel.obtain()
+            lastCommand = command
+            lastExecuteTime = now
 
-            try {
-                data.writeStringArray(arrayOf(command, "1"))
-                binder.transact(0, data, reply, IBinder.FLAG_ONEWAY)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
-                data.recycle()
-                reply.recycle()
+            pServerBinder?.let { binder ->
+                val data = Parcel.obtain()
+                val reply = Parcel.obtain()
+
+                try {
+                    data.writeStringArray(arrayOf(command, "1"))
+                    binder.transact(0, data, reply, IBinder.FLAG_ONEWAY)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                } finally {
+                    data.recycle()
+                    reply.recycle()
+                }
             }
         }
     }
 
     fun shutdown() {
-        commandExecutor.shutdown()
-        try {
-            commandExecutor.awaitTermination(1, TimeUnit.SECONDS)
-        } catch (e: InterruptedException) {
-            commandExecutor.shutdownNow()
-        }
     }
 }

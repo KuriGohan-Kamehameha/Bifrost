@@ -5,11 +5,9 @@ import android.media.projection.MediaProjection
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.DisplayMetrics
-import android.util.Log
 import com.moonbench.bifrost.tools.AudioAnalyzer
 import com.moonbench.bifrost.tools.LedController
 import com.moonbench.bifrost.tools.PerformanceProfile
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 
 class AudioReactiveAnimation(
@@ -31,42 +29,38 @@ class AudioReactiveAnimation(
     private var sensitivity: Float = 0.5f
     private var smoothedIntensity: Float = 0f
 
-    private val hasNewBrightnessData = AtomicBoolean(false)
-    private val isRunning = AtomicBoolean(false)
-
     @Volatile
-    private var cachedIntensity: Float = 0f
+    private var isRunning = false
 
-    private var animationThread: HandlerThread? = null
-    private var animationHandler: Handler? = null
+    private var updateThread: HandlerThread? = null
+    private var updateHandler: Handler? = null
+
+    private var hasAudioUpdate = false
+    private var pendingIntensity: Float = 0f
 
     private val updateInterval: Long
         get() = if (profile.intervalMs == 0L) 16L else profile.intervalMs
 
     private val ledUpdateRunnable = object : Runnable {
         override fun run() {
-            if (!isRunning.get()) return
+            if (!isRunning) return
 
-            var needsUpdate = false
+            if (hasAudioUpdate || currentBrightness > 0) {
+                hasAudioUpdate = false
 
-            if (hasNewBrightnessData.getAndSet(false) || currentBrightness > 0) {
-                val intensity = cachedIntensity
-                val clamped = intensity.coerceIn(0f, 1f)
-                val rising = clamped > smoothedIntensity
+                val intensity = pendingIntensity.coerceIn(0f, 1f)
+                val rising = intensity > smoothedIntensity
                 val f = if (rising) riseLerpFactor() else fallLerpFactor()
-                smoothedIntensity = lerpFloat(smoothedIntensity, clamped, f)
+                smoothedIntensity = lerpFloat(smoothedIntensity, intensity, f)
                 val mapped = mapIntensity(smoothedIntensity)
                 val target = (targetBrightness * mapped).roundToInt()
                 currentBrightness = lerpInt(currentBrightness, target, brightnessLerpFactor())
-                needsUpdate = true
-            }
 
-            if (needsUpdate) {
                 applyLeds()
             }
 
-            if (isRunning.get()) {
-                animationHandler?.postDelayed(this, updateInterval)
+            if (isRunning) {
+                updateHandler?.postDelayed(this, updateInterval)
             }
         }
     }
@@ -88,30 +82,35 @@ class AudioReactiveAnimation(
     }
 
     override fun start() {
-        if (isRunning.getAndSet(true)) return
+        if (isRunning) return
+        isRunning = true
 
-        animationThread = HandlerThread("AudioReactiveAnimation").apply { start() }
-        animationHandler = Handler(animationThread!!.looper)
-        animationHandler?.post(ledUpdateRunnable)
+        updateThread = HandlerThread("AudioReactiveUpdate").apply {
+            start()
+            priority = Thread.MAX_PRIORITY
+        }
+        updateHandler = Handler(updateThread!!.looper)
+        updateHandler?.post(ledUpdateRunnable)
 
         audioAnalyzer = AudioAnalyzer(mediaProjection, profile) { intensity ->
-            cachedIntensity = intensity
-            hasNewBrightnessData.set(true)
+            pendingIntensity = intensity
+            hasAudioUpdate = true
         }
         audioAnalyzer?.start()
     }
 
     override fun stop() {
-        if (!isRunning.getAndSet(false)) return
+        if (!isRunning) return
+        isRunning = false
 
-        animationHandler?.removeCallbacks(ledUpdateRunnable)
+        updateHandler?.removeCallbacks(ledUpdateRunnable)
         audioAnalyzer?.stop()
         audioAnalyzer = null
-        hasNewBrightnessData.set(false)
 
-        animationThread?.quitSafely()
-        animationThread = null
-        animationHandler = null
+        updateThread?.quitSafely()
+        updateThread = null
+        updateHandler = null
+
         currentBrightness = 0
         applyLeds()
     }

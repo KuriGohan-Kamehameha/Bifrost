@@ -6,10 +6,9 @@ import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
 import android.media.projection.MediaProjection
 import android.os.Build
-import android.os.Handler
-import android.os.HandlerThread
+import android.os.Process
 import androidx.annotation.RequiresApi
-import kotlin.math.sqrt
+import kotlin.math.abs
 
 @RequiresApi(Build.VERSION_CODES.Q)
 class AudioAnalyzer(
@@ -18,71 +17,28 @@ class AudioAnalyzer(
     private val callback: (Float) -> Unit
 ) {
     private var audioRecord: AudioRecord? = null
-    private var handlerThread: HandlerThread? = null
-    private var handler: Handler? = null
+    private var captureThread: Thread? = null
 
     @Volatile
     private var running = false
 
-    private val frameInterval: Long
-        get() = if (performanceProfile.intervalMs == 0L) 16L else performanceProfile.intervalMs
-
-    private val analysisRunnable = object : Runnable {
-        private val buffer = ShortArray(512)
-
-        override fun run() {
-            if (!running) return
-
-            val record = audioRecord
-            if (record == null || record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-                if (running) {
-                    handler?.postDelayed(this, frameInterval)
-                }
-                return
-            }
-
-            try {
-                val read = record.read(buffer, 0, buffer.size, AudioRecord.READ_NON_BLOCKING)
-
-                if (read > 0) {
-                    var sum = 0.0
-                    for (i in 0 until read) {
-                        val v = buffer[i].toDouble() / Short.MAX_VALUE
-                        sum += v * v
-                    }
-                    val rms = sqrt(sum / read)
-                    val intensity = (rms * 5f).toFloat().coerceIn(0f, 1f)
-                    callback(intensity)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-
-            if (running) {
-                handler?.postDelayed(this, frameInterval)
-            }
-        }
-    }
+    private val buffer = ShortArray(32)
 
     fun start() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         if (running) return
 
         try {
-            handlerThread = HandlerThread("AudioAnalyzer").apply { start() }
-            handler = Handler(handlerThread!!.looper)
-
             val config = AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
                 .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                 .addMatchingUsage(AudioAttributes.USAGE_GAME)
                 .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
                 .build()
 
-            val sampleRate = 22050
+            val sampleRate = 8000
             val channelConfig = AudioFormat.CHANNEL_IN_MONO
             val encoding = AudioFormat.ENCODING_PCM_16BIT
-            val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfig, encoding)
-            val recordBufferSize = if (minBuffer > 0) minBuffer else sampleRate / 2
+            val bufferSize = 512
 
             audioRecord = AudioRecord.Builder()
                 .setAudioPlaybackCaptureConfig(config)
@@ -93,7 +49,7 @@ class AudioAnalyzer(
                         .setChannelMask(channelConfig)
                         .build()
                 )
-                .setBufferSizeInBytes(recordBufferSize)
+                .setBufferSizeInBytes(bufferSize)
                 .build()
 
             val record = audioRecord
@@ -104,16 +60,48 @@ class AudioAnalyzer(
 
             running = true
 
-            handler?.postDelayed({
+            captureThread = Thread({
+                Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+
                 try {
                     record.startRecording()
-                    handler?.post(analysisRunnable)
+
+                    var skip = 0
+                    val skipInterval = when {
+                        performanceProfile.intervalMs >= 32L -> 3
+                        performanceProfile.intervalMs >= 16L -> 1
+                        else -> 0
+                    }
+
+                    while (running) {
+                        val read = record.read(buffer, 0, buffer.size)
+
+                        if (read > 0) {
+                            if (skip > 0) {
+                                skip--
+                                continue
+                            }
+                            skip = skipInterval
+
+                            var max = 0
+                            var i = 0
+                            while (i < read) {
+                                val abs = abs(buffer[i].toInt())
+                                if (abs > max) max = abs
+                                i++
+                            }
+
+                            val intensity = (max.toFloat() / Short.MAX_VALUE * 5f).coerceIn(0f, 1f)
+                            callback(intensity)
+                        }
+                    }
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    running = false
-                    cleanup()
                 }
-            }, 150)
+            }, "AudioCapture")
+
+            captureThread?.priority = Thread.MAX_PRIORITY
+            captureThread?.start()
 
         } catch (e: Exception) {
             e.printStackTrace()
@@ -125,16 +113,12 @@ class AudioAnalyzer(
     fun stop() {
         if (!running) return
         running = false
-        handler?.removeCallbacks(analysisRunnable)
 
-        val localHandler = handler
-        if (localHandler != null) {
-            localHandler.post {
-                cleanup()
-            }
-        } else {
-            cleanup()
-        }
+        captureThread?.interrupt()
+        captureThread?.join(100)
+        captureThread = null
+
+        cleanup()
     }
 
     private fun cleanup() {
@@ -150,9 +134,5 @@ class AudioAnalyzer(
         }
 
         audioRecord = null
-
-        handlerThread?.quitSafely()
-        handlerThread = null
-        handler = null
     }
 }

@@ -5,14 +5,12 @@ import android.media.projection.MediaProjection
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.DisplayMetrics
-import android.util.Log
 import com.moonbench.bifrost.tools.AudioAnalyzer
 import com.moonbench.bifrost.tools.LedController
 import com.moonbench.bifrost.tools.PerformanceProfile
 import com.moonbench.bifrost.tools.ScreenAnalyzer
 import com.moonbench.bifrost.tools.ScreenColors
 import com.moonbench.bifrost.tools.ScreenRegionType
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 
 class AmbiAuroraAnimation(
@@ -42,55 +40,55 @@ class AmbiAuroraAnimation(
     private var sensitivity: Float = 0.5f
     private var smoothedIntensity: Float = 0f
 
-    private val hasNewColorData = AtomicBoolean(false)
-    private val hasNewBrightnessData = AtomicBoolean(false)
-    private val isRunning = AtomicBoolean(false)
-
     @Volatile
-    private var cachedColors: ScreenColors? = null
-    @Volatile
-    private var cachedIntensity: Float = 0f
+    private var isRunning = false
 
-    private var animationThread: HandlerThread? = null
-    private var animationHandler: Handler? = null
+    private var updateThread: HandlerThread? = null
+    private var updateHandler: Handler? = null
+
+    private var hasColorUpdate = false
+    private var hasAudioUpdate = false
+    private var pendingColors: ScreenColors? = null
+    private var pendingIntensity: Float = 0f
 
     private val updateInterval: Long
         get() = if (profile.intervalMs == 0L) 16L else profile.intervalMs
 
-    private val ledUpdateRunnable = object : Runnable {
+    private val combinedUpdateRunnable = object : Runnable {
         override fun run() {
-            if (!isRunning.get()) return
+            if (!isRunning) return
 
-            var needsUpdate = false
+            var needsLedUpdate = false
 
-            if (hasNewColorData.getAndSet(false)) {
-                cachedColors?.let { colors ->
+            if (hasColorUpdate) {
+                hasColorUpdate = false
+                pendingColors?.let { colors ->
                     when (regionType) {
                         ScreenRegionType.TWO_SIDES -> updateTwoSidesColors(colors)
                         ScreenRegionType.FOUR_CORNERS -> updateFourCornersColors(colors)
                     }
-                    needsUpdate = true
+                    needsLedUpdate = true
                 }
             }
 
-            if (hasNewBrightnessData.getAndSet(false)) {
-                val intensity = cachedIntensity
-                val clamped = intensity.coerceIn(0f, 1f)
-                val rising = clamped > smoothedIntensity
+            if (hasAudioUpdate) {
+                hasAudioUpdate = false
+                val intensity = pendingIntensity.coerceIn(0f, 1f)
+                val rising = intensity > smoothedIntensity
                 val f = if (rising) riseLerpFactor() else fallLerpFactor()
-                smoothedIntensity = lerpFloat(smoothedIntensity, clamped, f)
+                smoothedIntensity = lerpFloat(smoothedIntensity, intensity, f)
                 val mapped = mapIntensity(smoothedIntensity)
                 val target = (targetBrightness * mapped).roundToInt()
                 currentBrightness = lerpInt(currentBrightness, target, brightnessLerpFactor())
-                needsUpdate = true
+                needsLedUpdate = true
             }
 
-            if (needsUpdate) {
+            if (needsLedUpdate) {
                 applyLeds()
             }
 
-            if (isRunning.get()) {
-                animationHandler?.postDelayed(this, updateInterval)
+            if (isRunning) {
+                updateHandler?.postDelayed(this, updateInterval)
             }
         }
     }
@@ -112,11 +110,16 @@ class AmbiAuroraAnimation(
     }
 
     override fun start() {
-        if (isRunning.getAndSet(true)) return
+        if (isRunning) return
+        isRunning = true
 
-        animationThread = HandlerThread("AmbiAuroraAnimation").apply { start() }
-        animationHandler = Handler(animationThread!!.looper)
-        animationHandler?.post(ledUpdateRunnable)
+        updateThread = HandlerThread("AmbiAuroraUpdate").apply {
+            start()
+            priority = Thread.MAX_PRIORITY
+        }
+        updateHandler = Handler(updateThread!!.looper)
+
+        updateHandler?.post(combinedUpdateRunnable)
 
         screenAnalyzer = ScreenAnalyzer(
             mediaProjection,
@@ -124,33 +127,32 @@ class AmbiAuroraAnimation(
             regionType,
             profile
         ) { colors ->
-            cachedColors = colors
-            hasNewColorData.set(true)
+            pendingColors = colors
+            hasColorUpdate = true
         }
         screenAnalyzer?.start()
 
         audioAnalyzer = AudioAnalyzer(mediaProjection, profile) { intensity ->
-            cachedIntensity = intensity
-            hasNewBrightnessData.set(true)
+            pendingIntensity = intensity
+            hasAudioUpdate = true
         }
         audioAnalyzer?.start()
     }
 
     override fun stop() {
-        if (!isRunning.getAndSet(false)) return
+        if (!isRunning) return
+        isRunning = false
 
-        animationHandler?.removeCallbacks(ledUpdateRunnable)
+        updateHandler?.removeCallbacks(combinedUpdateRunnable)
         screenAnalyzer?.stop()
         screenAnalyzer = null
         audioAnalyzer?.stop()
         audioAnalyzer = null
-        cachedColors = null
-        hasNewColorData.set(false)
-        hasNewBrightnessData.set(false)
 
-        animationThread?.quitSafely()
-        animationThread = null
-        animationHandler = null
+        updateThread?.quitSafely()
+        updateThread = null
+        updateHandler = null
+
         currentBrightness = 0
         applyLeds()
     }
