@@ -2,8 +2,6 @@ package com.moonbench.bifrost.animations
 
 import android.graphics.Color
 import android.media.projection.MediaProjection
-import android.os.Handler
-import android.os.Looper
 import android.util.DisplayMetrics
 import com.moonbench.bifrost.tools.LedController
 import com.moonbench.bifrost.tools.PerformanceProfile
@@ -34,26 +32,26 @@ class AmbilightAnimation(
 
     private var targetBrightness: Int = 255
     private var currentBrightness: Int = 255
-    private var lerpStrength: Float = 0.5f
-
-    private var lastUpdateTime = 0L
-    private val minUpdateInterval = profile.intervalMs
-    private val handler = Handler(Looper.getMainLooper())
-    private var pendingUpdate: Runnable? = null
+    private var response: Float = 0.5f
 
     override fun setTargetBrightness(brightness: Int) {
         targetBrightness = brightness.coerceIn(0, 255)
     }
 
     override fun setLerpStrength(strength: Float) {
-        lerpStrength = strength.coerceIn(0f, 1f)
+        response = strength.coerceIn(0f, 1f)
+    }
+
+    override fun setSpeed(speed: Float) {
+        response = speed.coerceIn(0f, 1f)
     }
 
     override fun start() {
         screenAnalyzer = ScreenAnalyzer(
             mediaProjection,
             displayMetrics,
-            regionType
+            regionType,
+            profile
         ) { colors ->
             updateColors(colors)
         }
@@ -61,41 +59,23 @@ class AmbilightAnimation(
     }
 
     override fun stop() {
-        pendingUpdate?.let { handler.removeCallbacks(it) }
-        pendingUpdate = null
         screenAnalyzer?.stop()
         screenAnalyzer = null
     }
 
     private fun colorLerpFactor(): Float {
-        return 0.1f + 0.8f * lerpStrength
+        val min = 0.1f
+        val max = 0.9f
+        return min + (max - min) * response
     }
 
     private fun brightnessLerpFactor(): Float {
-        return 0.1f + 0.8f * lerpStrength
+        val min = 0.1f
+        val max = 0.9f
+        return min + (max - min) * response
     }
 
     private fun updateColors(colors: ScreenColors) {
-        if (minUpdateInterval == 0L) {
-            performUpdate(colors)
-            return
-        }
-
-        val currentTime = System.currentTimeMillis()
-
-        if (currentTime - lastUpdateTime < minUpdateInterval) {
-            if (pendingUpdate == null) {
-                pendingUpdate = Runnable {
-                    pendingUpdate = null
-                    lastUpdateTime = System.currentTimeMillis()
-                    performUpdate(colors)
-                }
-                handler.postDelayed(pendingUpdate!!, minUpdateInterval)
-            }
-            return
-        }
-
-        lastUpdateTime = currentTime
         performUpdate(colors)
     }
 
@@ -237,6 +217,4 @@ class AmbilightAnimation(
             rightBottom = true
         )
     }
-
-
 }

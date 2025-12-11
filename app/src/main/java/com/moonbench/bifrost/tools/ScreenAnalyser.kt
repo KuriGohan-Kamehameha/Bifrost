@@ -11,19 +11,12 @@ import android.util.DisplayMetrics
 import java.nio.ByteBuffer
 
 data class ScreenColors(
-
     val leftColor: Int = Color.BLACK,
-
     val rightColor: Int = Color.BLACK,
-
     val topLeftColor: Int = Color.BLACK,
-
     val topRightColor: Int = Color.BLACK,
-
     val bottomLeftColor: Int = Color.BLACK,
-
     val bottomRightColor: Int = Color.BLACK
-
 )
 
 class ScreenAnalyzer(
@@ -43,8 +36,12 @@ class ScreenAnalyzer(
     private var handlerThread: HandlerThread? = null
     private var handler: Handler? = null
     private var projectionCallback: MediaProjection.Callback? = null
+    private var isRunning: Boolean = false
 
     fun start() {
+        if (isRunning) return
+        isRunning = true
+
         if (regionType == ScreenRegionType.TWO_SIDES) {
             captureWidth = 2
             captureHeight = 1
@@ -71,6 +68,12 @@ class ScreenAnalyzer(
         )
 
         imageReader?.setOnImageAvailableListener({ reader ->
+            if (!isRunning) {
+                val img = reader.acquireLatestImage()
+                img?.close()
+                return@setOnImageAvailableListener
+            }
+
             val now = System.currentTimeMillis()
             val image = reader.acquireLatestImage()
 
@@ -96,6 +99,9 @@ class ScreenAnalyzer(
     }
 
     fun stop() {
+        if (!isRunning) return
+        isRunning = false
+
         virtualDisplay?.release()
         imageReader?.close()
         handlerThread?.quitSafely()
@@ -113,6 +119,8 @@ class ScreenAnalyzer(
     }
 
     private fun processImage(image: Image) {
+        if (!isRunning) return
+
         val plane = image.planes[0]
         val buffer = plane.buffer
         val pixelStride = plane.pixelStride

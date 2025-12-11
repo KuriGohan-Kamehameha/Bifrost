@@ -2,6 +2,7 @@ package com.moonbench.bifrost.animations
 
 import android.graphics.Color
 import com.moonbench.bifrost.tools.LedController
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 abstract class LedAnimation(protected val ledController: LedController) {
@@ -19,11 +20,16 @@ abstract class LedAnimation(protected val ledController: LedController) {
     open fun setSensitivity(sensitivity: Float) {}
 
     protected fun lerpInt(from: Int, to: Int, factor: Float): Int {
-        return (from + (to - from) * factor).roundToInt().coerceIn(0, 255)
+        if (from == to) return from.coerceIn(0, 255)
+        val f = factor.coerceIn(0f, 1f)
+        val raw = from + (to - from) * f
+        val result = if (abs(to - raw) < 1f) to else raw.roundToInt()
+        return result.coerceIn(0, 255)
     }
 
     protected fun lerpFloat(from: Float, to: Float, factor: Float): Float {
-        return from + (to - from) * factor
+        val f = factor.coerceIn(0f, 1f)
+        return from + (to - from) * f
     }
 
     protected fun lerpColor(from: Int, to: Int, factor: Float): Int {

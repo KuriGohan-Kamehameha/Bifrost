@@ -3,8 +3,9 @@ package com.moonbench.bifrost.animations
 import android.graphics.Color
 import android.media.projection.MediaProjection
 import android.os.Handler
-import android.os.Looper
+import android.os.HandlerThread
 import android.util.DisplayMetrics
+import android.util.Log
 import com.moonbench.bifrost.tools.AudioAnalyzer
 import com.moonbench.bifrost.tools.LedController
 import com.moonbench.bifrost.tools.PerformanceProfile
@@ -26,17 +27,19 @@ class AudioReactiveAnimation(
 
     private var targetBrightness: Int = 255
     private var currentBrightness: Int = 0
-    private var lerpStrength: Float = 0.5f
-    private var speed: Float = 0.5f
+    private var response: Float = 0.5f
     private var sensitivity: Float = 0.5f
     private var smoothedIntensity: Float = 0f
 
-    private val hasNewData = AtomicBoolean(false)
+    private val hasNewBrightnessData = AtomicBoolean(false)
     private val isRunning = AtomicBoolean(false)
 
-    @Volatile private var cachedIntensity: Float = 0f
+    @Volatile
+    private var cachedIntensity: Float = 0f
 
-    private val handler = Handler(Looper.getMainLooper())
+    private var animationThread: HandlerThread? = null
+    private var animationHandler: Handler? = null
+
     private val updateInterval: Long
         get() = if (profile.intervalMs == 0L) 16L else profile.intervalMs
 
@@ -44,7 +47,9 @@ class AudioReactiveAnimation(
         override fun run() {
             if (!isRunning.get()) return
 
-            if (hasNewData.getAndSet(false)) {
+            var needsUpdate = false
+
+            if (hasNewBrightnessData.getAndSet(false) || currentBrightness > 0) {
                 val intensity = cachedIntensity
                 val clamped = intensity.coerceIn(0f, 1f)
                 val rising = clamped > smoothedIntensity
@@ -53,11 +58,15 @@ class AudioReactiveAnimation(
                 val mapped = mapIntensity(smoothedIntensity)
                 val target = (targetBrightness * mapped).roundToInt()
                 currentBrightness = lerpInt(currentBrightness, target, brightnessLerpFactor())
+                needsUpdate = true
+            }
+
+            if (needsUpdate) {
                 applyLeds()
             }
 
             if (isRunning.get()) {
-                handler.postDelayed(this, updateInterval)
+                animationHandler?.postDelayed(this, updateInterval)
             }
         }
     }
@@ -67,11 +76,11 @@ class AudioReactiveAnimation(
     }
 
     override fun setLerpStrength(strength: Float) {
-        lerpStrength = strength.coerceIn(0f, 1f)
+        response = strength.coerceIn(0f, 1f)
     }
 
     override fun setSpeed(speed: Float) {
-        this.speed = speed.coerceIn(0f, 1f)
+        response = speed.coerceIn(0f, 1f)
     }
 
     override fun setSensitivity(sensitivity: Float) {
@@ -81,53 +90,63 @@ class AudioReactiveAnimation(
     override fun start() {
         if (isRunning.getAndSet(true)) return
 
-        handler.post(ledUpdateRunnable)
+        animationThread = HandlerThread("AudioReactiveAnimation").apply { start() }
+        animationHandler = Handler(animationThread!!.looper)
+        animationHandler?.post(ledUpdateRunnable)
 
-        audioAnalyzer = AudioAnalyzer(mediaProjection) { intensity ->
+        audioAnalyzer = AudioAnalyzer(mediaProjection, profile) { intensity ->
             cachedIntensity = intensity
-            hasNewData.set(true)
+            hasNewBrightnessData.set(true)
         }
         audioAnalyzer?.start()
     }
 
     override fun stop() {
-        isRunning.set(false)
-        handler.removeCallbacks(ledUpdateRunnable)
+        if (!isRunning.getAndSet(false)) return
+
+        animationHandler?.removeCallbacks(ledUpdateRunnable)
         audioAnalyzer?.stop()
         audioAnalyzer = null
-        hasNewData.set(false)
+        hasNewBrightnessData.set(false)
+
+        animationThread?.quitSafely()
+        animationThread = null
+        animationHandler = null
+        currentBrightness = 0
+        applyLeds()
     }
 
     private fun riseLerpFactor(): Float {
-        val fastBase = 0.4f + 0.5f * speed
-        val smoothMul = 0.3f + 0.7f * (1f - lerpStrength)
-        return (fastBase * smoothMul).coerceIn(0.3f, 0.95f)
+        val min = 0.2f
+        val max = 0.9f
+        return min + (max - min) * response
     }
 
     private fun fallLerpFactor(): Float {
-        val slowBase = 0.1f + 0.4f * speed
-        val smoothMul = 0.5f + 0.5f * (1f - lerpStrength)
-        return (slowBase * smoothMul).coerceIn(0.05f, 0.6f)
+        val min = 0.07f
+        val max = 0.7f
+        return min + (max - min) * response
     }
 
     private fun brightnessLerpFactor(): Float {
-        val base = 0.3f + 0.6f * speed
-        val smoothMul = 0.2f + 0.8f * (1f - lerpStrength)
-        return (base * smoothMul).coerceIn(0.3f, 1f)
+        val min = 0.25f
+        val max = 1f
+        return min + (max - min) * response
     }
 
     private fun mapIntensity(raw: Float): Float {
         val noiseFloor = 0.05f + (0.25f * (1f - sensitivity))
+        if (raw <= noiseFloor) return 0f
         val norm = ((raw - noiseFloor) / (1f - noiseFloor)).coerceIn(0f, 1f)
-        val baseAmp = 1.3f + 0.7f * (1f - lerpStrength)
-        val sensitivityAmp = 0.5f + (1.5f * sensitivity)
-        val speedAmp = 0.7f + 0.6f * speed
-        val boosted = norm * baseAmp * sensitivityAmp * speedAmp
+        val amp = 0.5f + 1.5f * sensitivity
+        val boosted = norm * amp
         return boosted.coerceIn(0f, 1f)
     }
 
     private fun applyLeds() {
-        val scale = currentBrightness / 255f
+        val scale = (currentBrightness / 255f).let {
+            if (it < 0.02f) 0f else it * it
+        }
         val red = (Color.red(baseColor) * scale).roundToInt().coerceIn(0, 255)
         val green = (Color.green(baseColor) * scale).roundToInt().coerceIn(0, 255)
         val blue = (Color.blue(baseColor) * scale).roundToInt().coerceIn(0, 255)

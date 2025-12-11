@@ -14,6 +14,7 @@ import kotlin.math.sqrt
 @RequiresApi(Build.VERSION_CODES.Q)
 class AudioAnalyzer(
     private val mediaProjection: MediaProjection,
+    private val performanceProfile: PerformanceProfile,
     private val callback: (Float) -> Unit
 ) {
     private var audioRecord: AudioRecord? = null
@@ -23,6 +24,9 @@ class AudioAnalyzer(
     @Volatile
     private var running = false
 
+    private val frameInterval: Long
+        get() = if (performanceProfile.intervalMs == 0L) 16L else performanceProfile.intervalMs
+
     private val analysisRunnable = object : Runnable {
         private val buffer = ShortArray(512)
 
@@ -31,7 +35,9 @@ class AudioAnalyzer(
 
             val record = audioRecord
             if (record == null || record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-                handler?.postDelayed(this, 16)
+                if (running) {
+                    handler?.postDelayed(this, frameInterval)
+                }
                 return
             }
 
@@ -53,7 +59,7 @@ class AudioAnalyzer(
             }
 
             if (running) {
-                handler?.postDelayed(this, 16)
+                handler?.postDelayed(this, frameInterval)
             }
         }
     }
@@ -104,23 +110,31 @@ class AudioAnalyzer(
                     handler?.post(analysisRunnable)
                 } catch (e: Exception) {
                     e.printStackTrace()
+                    running = false
                     cleanup()
                 }
             }, 150)
 
         } catch (e: Exception) {
             e.printStackTrace()
+            running = false
             cleanup()
         }
     }
 
     fun stop() {
+        if (!running) return
         running = false
         handler?.removeCallbacks(analysisRunnable)
 
-        handler?.postDelayed({
+        val localHandler = handler
+        if (localHandler != null) {
+            localHandler.post {
+                cleanup()
+            }
+        } else {
             cleanup()
-        }, 100)
+        }
     }
 
     private fun cleanup() {

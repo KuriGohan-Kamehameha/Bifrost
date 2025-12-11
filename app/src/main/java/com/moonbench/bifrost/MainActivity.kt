@@ -305,6 +305,7 @@ class MainActivity : AppCompatActivity() {
 
         profileSpinner.onItemSelectedListener =
             object : AdapterView.OnItemSelectedListener {
+
                 override fun onItemSelected(
                     parent: AdapterView<*>?,
                     view: View?,
@@ -387,6 +388,10 @@ class MainActivity : AppCompatActivity() {
             object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                     selectedSpeed = progress / 100f
+                    selectedSmoothness = selectedSpeed
+                    if (fromUser) {
+                        smoothnessSeekBar.progress = progress
+                    }
                     if (LEDService.isRunning && fromUser && !serviceController.isServiceTransitioning && !isUpdatingFromPreset) {
                         sendLiveUpdateToLedService()
                     }
@@ -404,6 +409,10 @@ class MainActivity : AppCompatActivity() {
             object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                     selectedSmoothness = progress / 100f
+                    selectedSpeed = selectedSmoothness
+                    if (fromUser) {
+                        speedSeekBar.progress = progress
+                    }
                     if (LEDService.isRunning && fromUser && !serviceController.isServiceTransitioning && !isUpdatingFromPreset) {
                         sendLiveUpdateToLedService()
                     }
@@ -468,7 +477,7 @@ class MainActivity : AppCompatActivity() {
                 selectedColor = preset.color
                 selectedBrightness = preset.brightness
                 selectedSpeed = preset.speed
-                selectedSmoothness = preset.smoothness
+                selectedSmoothness = preset.speed
                 selectedSensitivity = preset.sensitivity
 
                 val types = LedAnimationType.values().toList()
@@ -479,8 +488,9 @@ class MainActivity : AppCompatActivity() {
 
                 colorButton.setBackgroundColor(selectedColor)
                 brightnessSeekBar.progress = selectedBrightness
-                speedSeekBar.progress = (selectedSpeed * 100).toInt()
-                smoothnessSeekBar.progress = (selectedSmoothness * 100).toInt()
+                val progress = (selectedSpeed * 100).toInt()
+                speedSeekBar.progress = progress
+                smoothnessSeekBar.progress = progress
                 sensitivitySeekBar.progress = (selectedSensitivity * 100).toInt()
 
                 updateParameterVisibility()
@@ -521,13 +531,16 @@ class MainActivity : AppCompatActivity() {
         animationCard.visibility = if (needsSpeed || needsSmoothness || needsSensitivity) View.VISIBLE else View.GONE
 
         if (animationCard.visibility == View.VISIBLE) {
-            findViewById<View>(R.id.speedLabel)?.visibility = if (needsSpeed) View.VISIBLE else View.GONE
-            speedSeekBar.visibility = if (needsSpeed) View.VISIBLE else View.GONE
+            val speedLabel = findViewById<View>(R.id.speedLabel)
+            val smoothnessLabel = findViewById<View>(R.id.smoothnessLabel)
+            speedLabel?.visibility = if (needsSpeed || needsSmoothness) View.VISIBLE else View.GONE
+            speedSeekBar.visibility = if (needsSpeed || needsSmoothness) View.VISIBLE else View.GONE
 
-            findViewById<View>(R.id.smoothnessLabel)?.visibility = if (needsSmoothness) View.VISIBLE else View.GONE
-            smoothnessSeekBar.visibility = if (needsSmoothness) View.VISIBLE else View.GONE
+            smoothnessLabel?.visibility = View.GONE
+            smoothnessSeekBar.visibility = View.GONE
 
-            findViewById<View>(R.id.sensitivityLabel)?.visibility = if (needsSensitivity) View.VISIBLE else View.GONE
+            val sensitivityLabel = findViewById<View>(R.id.sensitivityLabel)
+            sensitivityLabel?.visibility = if (needsSensitivity) View.VISIBLE else View.GONE
             sensitivitySeekBar.visibility = if (needsSensitivity) View.VISIBLE else View.GONE
         }
     }
