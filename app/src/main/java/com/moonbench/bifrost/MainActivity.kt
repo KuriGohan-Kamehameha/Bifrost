@@ -46,6 +46,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var speedSeekBar: SeekBar
     private lateinit var smoothnessSeekBar: SeekBar
     private lateinit var sensitivitySeekBar: SeekBar
+    private lateinit var saturationBoostSeekBar: SeekBar
     private lateinit var modeCard: MaterialCardView
     private lateinit var colorCard: MaterialCardView
     private lateinit var animationCard: MaterialCardView
@@ -69,6 +70,7 @@ class MainActivity : AppCompatActivity() {
     private var selectedSpeed: Float = 0.5f
     private var selectedSmoothness: Float = 0.5f
     private var selectedSensitivity: Float = 0.5f
+    private var selectedSaturationBoost: Float = 0.0f
     private var isAwaitingPermissionResult = false
     private var isUpdatingFromPreset = false
     private var rainbowDrawable: AnimatedRainbowDrawable? = null
@@ -172,6 +174,7 @@ class MainActivity : AppCompatActivity() {
         speedSeekBar = findViewById(R.id.speedSeekBar)
         smoothnessSeekBar = findViewById(R.id.smoothnessSeekBar)
         sensitivitySeekBar = findViewById(R.id.sensitivitySeekBar)
+        saturationBoostSeekBar = findViewById(R.id.saturationBoostSeekBar)
         modeCard = findViewById(R.id.modeCard)
         colorCard = findViewById(R.id.colorCard)
         animationCard = findViewById(R.id.animationCard)
@@ -196,6 +199,7 @@ class MainActivity : AppCompatActivity() {
         setupSpeedSeekBar()
         setupSmoothnessSeekBar()
         setupSensitivitySeekBar()
+        setupSaturationBoostSeekBar()
         setupPresetFeature()
         updateParameterVisibility()
         enableRainbowBackground(LEDService.isRunning)
@@ -440,6 +444,23 @@ class MainActivity : AppCompatActivity() {
             })
     }
 
+    private fun setupSaturationBoostSeekBar() {
+        saturationBoostSeekBar.max = 100
+        saturationBoostSeekBar.progress = (selectedSaturationBoost * 100).toInt()
+        saturationBoostSeekBar.setOnSeekBarChangeListener(
+            object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    selectedSaturationBoost = progress / 100f
+                    if (LEDService.isRunning && fromUser && !serviceController.isServiceTransitioning && !isUpdatingFromPreset) {
+                        sendLiveUpdateToLedService()
+                    }
+                }
+
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+    }
+
     private fun setupPresetFeature() {
         val initialConfigPreset = LedPreset(
             name = "Initial",
@@ -449,7 +470,8 @@ class MainActivity : AppCompatActivity() {
             brightness = selectedBrightness,
             speed = selectedSpeed,
             smoothness = selectedSmoothness,
-            sensitivity = selectedSensitivity
+            sensitivity = selectedSensitivity,
+            saturationBoost = selectedSaturationBoost
         )
 
         presetController = PresetController(
@@ -468,7 +490,8 @@ class MainActivity : AppCompatActivity() {
                     brightness = selectedBrightness,
                     speed = selectedSpeed,
                     smoothness = selectedSmoothness,
-                    sensitivity = selectedSensitivity
+                    sensitivity = selectedSensitivity,
+                    saturationBoost = selectedSaturationBoost
                 )
             },
             applyPresetToUi = { preset ->
@@ -479,6 +502,7 @@ class MainActivity : AppCompatActivity() {
                 selectedSpeed = preset.speed
                 selectedSmoothness = preset.speed
                 selectedSensitivity = preset.sensitivity
+                selectedSaturationBoost = preset.saturationBoost
 
                 val types = LedAnimationType.values().toList()
                 animationSpinner.setSelection(types.indexOf(selectedAnimationType).coerceAtLeast(0))
@@ -492,6 +516,7 @@ class MainActivity : AppCompatActivity() {
                 speedSeekBar.progress = progress
                 smoothnessSeekBar.progress = progress
                 sensitivitySeekBar.progress = (selectedSensitivity * 100).toInt()
+                saturationBoostSeekBar.progress = (selectedSaturationBoost * 100).toInt()
 
                 updateParameterVisibility()
             },
@@ -525,23 +550,30 @@ class MainActivity : AppCompatActivity() {
         val needsSpeed = selectedAnimationType.supportsSpeed
         val needsSmoothness = selectedAnimationType.supportsSmoothness
         val needsSensitivity = selectedAnimationType.supportsAudioSensitivity
+        val needsSaturationBoost = selectedAnimationType == LedAnimationType.AMBILIGHT ||
+                selectedAnimationType == LedAnimationType.AMBIAURORA
 
         colorCard.visibility = if (needsColor) View.VISIBLE else View.GONE
         performanceCard.visibility = if (needsProfile) View.VISIBLE else View.GONE
-        animationCard.visibility = if (needsSpeed || needsSmoothness || needsSensitivity) View.VISIBLE else View.GONE
+        animationCard.visibility = if (needsSpeed || needsSmoothness || needsSensitivity || needsSaturationBoost) View.VISIBLE else View.GONE
 
         if (animationCard.visibility == View.VISIBLE) {
             val speedLabel = findViewById<View>(R.id.speedLabel)
             val smoothnessLabel = findViewById<View>(R.id.smoothnessLabel)
+            val sensitivityLabel = findViewById<View>(R.id.sensitivityLabel)
+            val saturationBoostLabel = findViewById<View>(R.id.saturationBoostLabel)
+
             speedLabel?.visibility = if (needsSpeed || needsSmoothness) View.VISIBLE else View.GONE
             speedSeekBar.visibility = if (needsSpeed || needsSmoothness) View.VISIBLE else View.GONE
 
             smoothnessLabel?.visibility = View.GONE
             smoothnessSeekBar.visibility = View.GONE
 
-            val sensitivityLabel = findViewById<View>(R.id.sensitivityLabel)
             sensitivityLabel?.visibility = if (needsSensitivity) View.VISIBLE else View.GONE
             sensitivitySeekBar.visibility = if (needsSensitivity) View.VISIBLE else View.GONE
+
+            saturationBoostLabel?.visibility = if (needsSaturationBoost) View.VISIBLE else View.GONE
+            saturationBoostSeekBar.visibility = if (needsSaturationBoost) View.VISIBLE else View.GONE
         }
     }
 
@@ -652,6 +684,7 @@ class MainActivity : AppCompatActivity() {
             putExtra("speed", selectedSpeed)
             putExtra("smoothness", selectedSmoothness)
             putExtra("sensitivity", selectedSensitivity)
+            putExtra("saturationBoost", selectedSaturationBoost)
             if (selectedAnimationType.needsMediaProjection) {
                 putExtra("resultCode", mediaProjectionResultCode)
                 putExtra("data", mediaProjectionData)
@@ -668,6 +701,7 @@ class MainActivity : AppCompatActivity() {
             putExtra("speed", selectedSpeed)
             putExtra("smoothness", selectedSmoothness)
             putExtra("sensitivity", selectedSensitivity)
+            putExtra("saturationBoost", selectedSaturationBoost)
         }
         startService(intent)
     }

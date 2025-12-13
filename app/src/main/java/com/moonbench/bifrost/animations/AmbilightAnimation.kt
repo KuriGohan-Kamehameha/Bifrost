@@ -33,6 +33,7 @@ class AmbilightAnimation(
     private var targetBrightness: Int = 255
     private var currentBrightness: Int = 255
     private var response: Float = 0.5f
+    private var saturationBoost: Float = 0.0f
 
     override fun setTargetBrightness(brightness: Int) {
         targetBrightness = brightness.coerceIn(0, 255)
@@ -44,6 +45,10 @@ class AmbilightAnimation(
 
     override fun setSpeed(speed: Float) {
         response = speed.coerceIn(0f, 1f)
+    }
+
+    override fun setSaturationBoost(boost: Float) {
+        saturationBoost = boost.coerceIn(0f, 1f)
     }
 
     override fun start() {
@@ -87,16 +92,28 @@ class AmbilightAnimation(
     }
 
     private fun updateTwoSides(colors: ScreenColors) {
-        currentLeftColor = if (isColorBlack(colors.leftColor)) {
+        val leftTarget = if (isColorBlack(colors.leftColor)) {
             Color.BLACK
         } else {
-            lerpColor(currentLeftColor, colors.leftColor, colorLerpFactor())
+            boostSaturation(colors.leftColor, saturationBoost)
         }
 
-        currentRightColor = if (isColorBlack(colors.rightColor)) {
+        val rightTarget = if (isColorBlack(colors.rightColor)) {
             Color.BLACK
         } else {
-            lerpColor(currentRightColor, colors.rightColor, colorLerpFactor())
+            boostSaturation(colors.rightColor, saturationBoost)
+        }
+
+        currentLeftColor = if (isColorBlack(leftTarget)) {
+            Color.BLACK
+        } else {
+            lerpColor(currentLeftColor, leftTarget, colorLerpFactor())
+        }
+
+        currentRightColor = if (isColorBlack(rightTarget)) {
+            Color.BLACK
+        } else {
+            lerpColor(currentRightColor, rightTarget, colorLerpFactor())
         }
 
         currentBrightness = lerpInt(currentBrightness, targetBrightness, brightnessLerpFactor())
@@ -133,28 +150,52 @@ class AmbilightAnimation(
     }
 
     private fun updateFourCorners(colors: ScreenColors) {
-        currentTopLeftColor = if (isColorBlack(colors.topLeftColor)) {
+        val topLeftTarget = if (isColorBlack(colors.topLeftColor)) {
             Color.BLACK
         } else {
-            lerpColor(currentTopLeftColor, colors.topLeftColor, colorLerpFactor())
+            boostSaturation(colors.topLeftColor, saturationBoost)
         }
 
-        currentTopRightColor = if (isColorBlack(colors.topRightColor)) {
+        val topRightTarget = if (isColorBlack(colors.topRightColor)) {
             Color.BLACK
         } else {
-            lerpColor(currentTopRightColor, colors.topRightColor, colorLerpFactor())
+            boostSaturation(colors.topRightColor, saturationBoost)
         }
 
-        currentBottomLeftColor = if (isColorBlack(colors.bottomLeftColor)) {
+        val bottomLeftTarget = if (isColorBlack(colors.bottomLeftColor)) {
             Color.BLACK
         } else {
-            lerpColor(currentBottomLeftColor, colors.bottomLeftColor, colorLerpFactor())
+            boostSaturation(colors.bottomLeftColor, saturationBoost)
         }
 
-        currentBottomRightColor = if (isColorBlack(colors.bottomRightColor)) {
+        val bottomRightTarget = if (isColorBlack(colors.bottomRightColor)) {
             Color.BLACK
         } else {
-            lerpColor(currentBottomRightColor, colors.bottomRightColor, colorLerpFactor())
+            boostSaturation(colors.bottomRightColor, saturationBoost)
+        }
+
+        currentTopLeftColor = if (isColorBlack(topLeftTarget)) {
+            Color.BLACK
+        } else {
+            lerpColor(currentTopLeftColor, topLeftTarget, colorLerpFactor())
+        }
+
+        currentTopRightColor = if (isColorBlack(topRightTarget)) {
+            Color.BLACK
+        } else {
+            lerpColor(currentTopRightColor, topRightTarget, colorLerpFactor())
+        }
+
+        currentBottomLeftColor = if (isColorBlack(bottomLeftTarget)) {
+            Color.BLACK
+        } else {
+            lerpColor(currentBottomLeftColor, bottomLeftTarget, colorLerpFactor())
+        }
+
+        currentBottomRightColor = if (isColorBlack(bottomRightTarget)) {
+            Color.BLACK
+        } else {
+            lerpColor(currentBottomRightColor, bottomRightTarget, colorLerpFactor())
         }
 
         currentBrightness = lerpInt(currentBrightness, targetBrightness, brightnessLerpFactor())

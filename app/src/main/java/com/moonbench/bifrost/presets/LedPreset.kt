@@ -12,5 +12,6 @@ data class LedPreset(
     val speed: Float,
     val smoothness: Float,
     val sensitivity: Float = 0.5f,
+    val saturationBoost: Float = 0.0f,
     val ragnarokAccepted: Boolean = false
 )

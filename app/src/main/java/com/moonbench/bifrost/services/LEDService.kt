@@ -18,6 +18,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.DisplayMetrics
+import android.util.Log
 import android.view.WindowManager
 import com.moonbench.bifrost.MainActivity
 import com.moonbench.bifrost.R
@@ -65,6 +66,8 @@ class LEDService : Service() {
     private var currentSensitivity: Float = 0.5f
     private var currentProfile: PerformanceProfile = PerformanceProfile.MEDIUM
     private var currentAnimationType: LedAnimationType = LedAnimationType.AMBILIGHT
+    private var currentSaturationBoost: Float = 0f
+
 
     private val activityCheckRunnable = object : Runnable {
         override fun run() {
@@ -128,6 +131,7 @@ class LEDService : Service() {
         val speed = intent.getFloatExtra("speed", 0.5f).coerceIn(0f, 1f)
         val smoothness = intent.getFloatExtra("smoothness", 0.5f).coerceIn(0f, 1f)
         val sensitivity = intent.getFloatExtra("sensitivity", 0.5f).coerceIn(0f, 1f)
+        currentSaturationBoost = intent.getFloatExtra("saturationBoost", 0f).coerceIn(0f, 1f)
 
         currentAnimationType = animationType
         currentProfile = profile
@@ -196,6 +200,15 @@ class LEDService : Service() {
             currentSensitivity = newSensitivity
             animation.setSensitivity(currentSensitivity)
         }
+
+        if (intent.hasExtra("saturationBoost")) {
+            val newSaturationBoost = intent.getFloatExtra("saturationBoost", currentSaturationBoost).coerceIn(0f, 1f)
+            if (newSaturationBoost != currentSaturationBoost) {
+                currentSaturationBoost = newSaturationBoost
+                currentAnimation?.setSaturationBoost(currentSaturationBoost)
+            }
+        }
+
     }
 
     private fun processAnimationChange(

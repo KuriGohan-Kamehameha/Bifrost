@@ -136,6 +136,7 @@ class PresetController(
                     speed = obj.optDouble("speed", 0.5).toFloat(),
                     smoothness = obj.optDouble("smoothness", 0.5).toFloat(),
                     sensitivity = obj.optDouble("sensitivity", 0.5).toFloat(),
+                    saturationBoost = obj.optDouble("saturationBoost", 0.0).toFloat(),
                     ragnarokAccepted = accepted
                 )
             )
@@ -157,6 +158,7 @@ class PresetController(
             obj.put("speed", preset.speed.toDouble())
             obj.put("smoothness", preset.smoothness.toDouble())
             obj.put("sensitivity", preset.sensitivity.toDouble())
+            obj.put("saturationBoost", preset.saturationBoost.toDouble())
             obj.put("ragnarokAccepted", preset.ragnarokAccepted)
             array.put(obj)
         }

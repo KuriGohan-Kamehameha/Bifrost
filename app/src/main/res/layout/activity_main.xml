@@ -386,6 +386,23 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             style="@style/BifrostSeekBar" />
+
+                        <TextView
+                            android:id="@+id/saturationBoostLabel"
+                            android:text="SATURATION BOOST"
+                            android:textColor="@color/bifrost_text_secondary"
+                            android:textSize="10sp"
+                            android:letterSpacing="0.1"
+                            android:layout_marginTop="16dp"
+                            android:layout_marginBottom="8dp"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                        <SeekBar
+                            android:id="@+id/saturationBoostSeekBar"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            style="@style/BifrostSeekBar" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
