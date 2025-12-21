@@ -170,7 +170,7 @@ class LEDService : Service() {
                     val sensitivity = currentSensitivity
                     val profile = currentProfile
                     stopCurrentAnimation()
-                    startAnimation(type, currentColor, brightness, speed, smoothness, sensitivity, profile)
+                    startAnimation(type, currentColor, brightness, speed, smoothness, sensitivity, profile, currentSaturationBoost)
                     return
                 }
             }
@@ -219,7 +219,7 @@ class LEDService : Service() {
                 val sensitivity = currentSensitivity
                 val profile = currentProfile
                 stopCurrentAnimation()
-                startAnimation(type, currentColor, brightness, speed, smoothness, sensitivity, profile)
+                startAnimation(type, currentColor, brightness, speed, smoothness, sensitivity, profile, currentSaturationBoost)
             }
         }
     }
@@ -248,7 +248,7 @@ class LEDService : Service() {
                             try {
                                 if (isRunning && !isStopping.get()) {
                                     mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, data)
-                                    startAnimation(animationType, color, brightness, speed, smoothness, sensitivity, profile)
+                                    startAnimation(animationType, color, brightness, speed, smoothness, sensitivity, profile, currentSaturationBoost)
                                 }
                             } catch (e: Exception) {
                                 e.printStackTrace()
@@ -269,7 +269,7 @@ class LEDService : Service() {
         } else {
             handler.postDelayed({
                 if (isRunning && !isStopping.get()) {
-                    startAnimation(animationType, color, brightness, speed, smoothness, sensitivity, profile)
+                    startAnimation(animationType, color, brightness, speed, smoothness, sensitivity, profile, currentSaturationBoost)
                 }
                 isTransitioning.set(false)
             }, 100)
@@ -393,10 +393,11 @@ class LEDService : Service() {
         speed: Float,
         smoothness: Float,
         sensitivity: Float,
-        profile: PerformanceProfile
+        profile: PerformanceProfile,
+        saturationBoost: Float
     ) {
         try {
-            currentAnimation = createAnimation(type, color, profile)
+            currentAnimation = createAnimation(type, color, profile, saturationBoost)
             currentAnimation?.setTargetBrightness(brightness)
             currentAnimation?.setSpeed(speed)
             currentAnimation?.setLerpStrength(smoothness)
@@ -414,7 +415,12 @@ class LEDService : Service() {
                 type == LedAnimationType.AMBIAURORA
     }
 
-    private fun createAnimation(type: LedAnimationType, color: Int, profile: PerformanceProfile): LedAnimation? {
+    private fun createAnimation(
+        type: LedAnimationType,
+        color: Int,
+        profile: PerformanceProfile,
+        saturationBoost: Float
+    ): LedAnimation? {
         return when (type) {
             LedAnimationType.AMBILIGHT -> {
                 val projection = mediaProjection ?: return null
@@ -426,7 +432,8 @@ class LEDService : Service() {
                     projection,
                     displayMetrics,
                     profile,
-                    currentUseCustomSampling
+                    currentUseCustomSampling,
+                    saturationBoost
                 )
             }
             LedAnimationType.AUDIO_REACTIVE -> {
@@ -452,7 +459,8 @@ class LEDService : Service() {
                     projection,
                     displayMetrics,
                     profile,
-                    currentUseCustomSampling
+                    currentUseCustomSampling,
+                    saturationBoost
                 )
             }
             LedAnimationType.STATIC -> StaticAnimation(ledController, color)

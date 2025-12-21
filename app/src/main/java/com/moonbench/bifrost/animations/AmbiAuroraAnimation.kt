@@ -17,7 +17,8 @@ class AmbiAuroraAnimation(
     private val mediaProjection: MediaProjection,
     private val displayMetrics: DisplayMetrics,
     private val profile: PerformanceProfile,
-    private val useCustomSampling: Boolean
+    private val useCustomSampling: Boolean,
+    initialSaturationBoost: Float = 0.0f
 ) : LedAnimation(ledController) {
 
     override val type: LedAnimationType = LedAnimationType.AMBIAURORA
@@ -33,7 +34,7 @@ class AmbiAuroraAnimation(
     private var currentBrightness: Int = 0
     private var response: Float = 0.5f
     private var sensitivity: Float = 0.5f
-    private var saturationBoost: Float = 0.0f
+    private var saturationBoost: Float = initialSaturationBoost
     private var smoothedIntensity: Float = 0f
 
     @Volatile
@@ -104,6 +105,7 @@ class AmbiAuroraAnimation(
 
     override fun setSaturationBoost(boost: Float) {
         saturationBoost = boost.coerceIn(0f, 1f)
+        screenAnalyzer?.saturationBoost = saturationBoost
     }
 
     override fun start() {
@@ -122,7 +124,8 @@ class AmbiAuroraAnimation(
             mediaProjection,
             displayMetrics,
             profile,
-            useCustomSampling
+            useCustomSampling,
+            saturationBoost
         ) { colors ->
             pendingColors = colors
             hasColorUpdate = true
@@ -191,13 +194,13 @@ class AmbiAuroraAnimation(
         val leftTarget = if (isColorBlack(colors.leftColor)) {
             Color.BLACK
         } else {
-            boostSaturation(colors.leftColor, saturationBoost)
+            colors.leftColor
         }
 
         val rightTarget = if (isColorBlack(colors.rightColor)) {
             Color.BLACK
         } else {
-            boostSaturation(colors.rightColor, saturationBoost)
+            colors.rightColor
         }
 
         currentLeftColor = if (isColorBlack(leftTarget)) {

@@ -14,7 +14,8 @@ class AmbilightAnimation(
     private val mediaProjection: MediaProjection,
     private val displayMetrics: DisplayMetrics,
     private val profile: PerformanceProfile,
-    private val useCustomSampling: Boolean
+    private val useCustomSampling: Boolean,
+    initialSaturationBoost: Float = 0.0f
 ) : LedAnimation(ledController) {
 
     override val type: LedAnimationType = LedAnimationType.AMBILIGHT
@@ -28,7 +29,7 @@ class AmbilightAnimation(
     private var targetBrightness: Int = 255
     private var currentBrightness: Int = 255
     private var response: Float = 0.5f
-    private var saturationBoost: Float = 0.0f
+    private var saturationBoost: Float = initialSaturationBoost
 
     override fun setTargetBrightness(brightness: Int) {
         targetBrightness = brightness.coerceIn(0, 255)
@@ -44,6 +45,7 @@ class AmbilightAnimation(
 
     override fun setSaturationBoost(boost: Float) {
         saturationBoost = boost.coerceIn(0f, 1f)
+        screenAnalyzer?.saturationBoost = saturationBoost
     }
 
     override fun start() {
@@ -51,7 +53,8 @@ class AmbilightAnimation(
             mediaProjection,
             displayMetrics,
             profile,
-            useCustomSampling
+            useCustomSampling,
+            saturationBoost
         ) { colors ->
             updateColors(colors)
         }
@@ -79,13 +82,13 @@ class AmbilightAnimation(
         val leftTarget = if (isColorBlack(colors.leftColor)) {
             Color.BLACK
         } else {
-            boostSaturation(colors.leftColor, saturationBoost)
+            colors.leftColor
         }
 
         val rightTarget = if (isColorBlack(colors.rightColor)) {
             Color.BLACK
         } else {
-            boostSaturation(colors.rightColor, saturationBoost)
+            colors.rightColor
         }
 
         currentLeftColor = if (isColorBlack(leftTarget)) {
