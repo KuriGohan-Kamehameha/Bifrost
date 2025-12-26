@@ -113,7 +113,7 @@ locally and is reduced to minimal pixel data for efficiency.
 
 Bifrost has been tested and confirmed to work on the following devices:
 
-- Retroid Pocket Mini V2 (known issues, might be working in single color mode)
+- Retroid Pocket Mini V2
 - Retroid Pocket 5
 - Odin 2 Portal Pro
 
@@ -130,7 +130,7 @@ occur on some devices.
 - Random crashes under certain conditions
 - Granting notification permission at launch may cause the LED toggle
   switch to appear disabled even though animations continue running
-- On the Retroid Pocket Mini, only the left stick turns on in Ambilight mode
+- On the Retroid Pocket Mini, only the left stick turns on in Ambilight mode. This issue can be solved using the custom color sampler mode. Thank's to r/hupo224 for helping me work on this issue.
 
 If you encounter issues, please open a GitHub issue or check the
 existing ones.
