@@ -73,6 +73,28 @@ possible**, which may cause latency or even crashes.
 
 ------------------------------------------------------------------------
 
+## 📦 Installation
+
+Bifrost can be installed in two different ways:
+
+### **Method 1 — Manual APK install**
+
+1. Download the latest **APK** from the GitHub releases page.
+2. Open your **Downloads** folder.
+3. Tap the APK file to start the installation.
+4. If Android asks to allow installation from **unknown sources**, accept the permission.
+5. Complete the installation.
+
+### **Method 2 — Install & update via Obtainium (recommended)**
+
+If you use **Obtainium**, you can automatically receive updates:
+
+1. Open the Obtainium app. It can be found here : https://github.com/ImranR98/Obtainium
+2. Add a new app using this source: https://github.com/Pollux-MoonBench/Bifrost/releases/
+3. Follow the Obtainium classic installation process
+
+------------------------------------------------------------------------
+
 ## 🔒 Required Permissions
 
 To enable Ambilight, Audio Reactive, and Ambi Aurora modes, Bifrost
@@ -93,6 +115,7 @@ Bifrost has been tested and confirmed to work on the following devices:
 
 - Retroid Pocket Mini V2 (known issues, might be working in single color mode)
 - Retroid Pocket 5
+- Odin 2 Portal Pro
 
 ------------------------------------------------------------------------
 
