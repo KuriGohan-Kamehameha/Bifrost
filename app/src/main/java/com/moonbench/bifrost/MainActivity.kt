@@ -605,6 +605,8 @@ class MainActivity : AppCompatActivity() {
             val saturationBoostLabel = findViewById<View>(R.id.saturationBoostLabel)
             val customSamplingLabel = findViewById<View>(R.id.customSamplingLabel)
             val singleColorLabel = findViewById<View>(R.id.singleColorLabel)
+            val ignoreletterbox = findViewById<View>(R.id.ignoreletterbox)
+            var bothSticksSameColor = findViewById<View>(R.id.bothSticksSameColor)
 
             speedLabel?.visibility = if (needsSpeed || needsSmoothness) View.VISIBLE else View.GONE
             speedSeekBar.visibility = if (needsSpeed || needsSmoothness) View.VISIBLE else View.GONE
@@ -620,9 +622,11 @@ class MainActivity : AppCompatActivity() {
 
             customSamplingLabel?.visibility = if (needsCustomSampling) View.VISIBLE else View.GONE
             customSamplingSwitch.visibility = if (needsCustomSampling) View.VISIBLE else View.GONE
+            ignoreletterbox.visibility = if (needsCustomSampling) View.VISIBLE else View.GONE
 
             singleColorLabel?.visibility = if (needsSingleColor) View.VISIBLE else View.GONE
             singleColorSwitch.visibility = if (needsSingleColor) View.VISIBLE else View.GONE
+            bothSticksSameColor.visibility = if (needsSingleColor) View.VISIBLE else View.GONE
         }
     }
 
