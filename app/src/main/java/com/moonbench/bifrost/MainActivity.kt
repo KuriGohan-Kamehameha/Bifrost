@@ -595,9 +595,7 @@ class MainActivity : AppCompatActivity() {
         val needsSingleColor = selectedAnimationType == LedAnimationType.AMBILIGHT ||
                 selectedAnimationType == LedAnimationType.AMBIAURORA
 
-        val supportsBrightness = selectedAnimationType != LedAnimationType.AMBILIGHT &&
-                selectedAnimationType != LedAnimationType.AMBIAURORA &&
-                selectedAnimationType != LedAnimationType.AUDIO_REACTIVE
+        val supportsBrightness = true
 
         colorCard.visibility = if (needsColor || supportsBrightness) View.VISIBLE else View.GONE
 
