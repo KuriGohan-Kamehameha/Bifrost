@@ -24,6 +24,7 @@ import com.moonbench.bifrost.R
 import com.moonbench.bifrost.animations.AmbiAuroraAnimation
 import com.moonbench.bifrost.animations.AmbilightAnimation
 import com.moonbench.bifrost.animations.AudioReactiveAnimation
+import com.moonbench.bifrost.animations.BatteryIndicatorAnimation
 import com.moonbench.bifrost.animations.BreathAnimation
 import com.moonbench.bifrost.animations.ChaseAnimation
 import com.moonbench.bifrost.animations.FadeTransitionAnimation
@@ -482,6 +483,7 @@ class LEDService : Service() {
                     saturationBoost
                 )
             }
+            LedAnimationType.BATTERY_INDICATOR -> BatteryIndicatorAnimation(ledController, this)
             LedAnimationType.STATIC -> StaticAnimation(ledController, color)
             LedAnimationType.BREATH -> BreathAnimation(ledController, color)
             LedAnimationType.RAINBOW -> RainbowAnimation(ledController)
