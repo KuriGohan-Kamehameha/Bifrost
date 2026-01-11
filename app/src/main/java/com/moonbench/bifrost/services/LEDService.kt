@@ -397,7 +397,7 @@ class LEDService : Service() {
         return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("LED Active")
             .setContentText("Tap to configure")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.mipmap.ic_notification_foreground)
             .setContentIntent(mainPendingIntent)
             .addAction(android.R.drawable.ic_delete, "Stop", stopPendingIntent)
             .setOngoing(true)
