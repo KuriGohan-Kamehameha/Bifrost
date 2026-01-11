@@ -6,6 +6,7 @@ import com.moonbench.bifrost.tools.LedController
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 abstract class LedAnimation(protected val ledController: LedController) {
@@ -22,6 +23,12 @@ abstract class LedAnimation(protected val ledController: LedController) {
     open fun setSpeed(speed: Float) {}
     open fun setSensitivity(sensitivity: Float) {}
     open fun setSaturationBoost(boost: Float) {}
+
+    protected fun applyGamma(value: Int): Int {
+        val normalized = value / 255f
+        val corrected = normalized.pow(2.0f)
+        return (corrected * 255f).roundToInt().coerceIn(0, 255)
+    }
 
     protected fun lerpInt(from: Int, to: Int, factor: Float): Int {
         if (from == to) return from.coerceIn(0, 255)

@@ -219,7 +219,8 @@ class AmbiAuroraAnimation(
     }
 
     private fun applyLeds() {
-        val scale = currentBrightness / 255f
+        val gammaCorrectedBrightness = applyGamma(currentBrightness)
+        val scale = gammaCorrectedBrightness / 255f
 
         val leftRed = (Color.red(currentLeftColor) * scale).roundToInt().coerceIn(0, 255)
         val leftGreen = (Color.green(currentLeftColor) * scale).roundToInt().coerceIn(0, 255)
