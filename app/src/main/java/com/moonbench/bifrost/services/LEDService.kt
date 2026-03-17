@@ -45,7 +45,6 @@ import com.moonbench.bifrost.animations.StaticAnimation
 import com.moonbench.bifrost.animations.StrobeAnimation
 import com.moonbench.bifrost.tools.LedController
 import com.moonbench.bifrost.tools.PerformanceProfile
-import com.moonbench.bifrost.LedPreset
 import java.util.concurrent.atomic.AtomicBoolean
 
 class LEDService : Service() {
@@ -53,6 +52,7 @@ class LEDService : Service() {
     companion object {
         private const val PREF_KEY_LAST_PRESET = "last_preset_name"
         private const val ACTIVITY_CHECK_INTERVAL_MS = 2000L
+        private const val ACTIVITY_CHECK_INTERVAL_APP_PROFILE_MS = 700L
         private const val TRANSITION_RETRY_DELAY_MS = 200L
         private const val TRANSITION_START_DELAY_MS = 100L
         private const val PROJECTION_RESTART_DELAY_MS = 150L
@@ -62,9 +62,17 @@ class LEDService : Service() {
         const val NOTIFICATION_ID = 4242
         const val ACTION_STOP = "com.moonbench.bifrost.STOP"
         const val ACTION_UPDATE_PARAMS = "com.moonbench.bifrost.UPDATE_PARAMS"
+        const val ACTION_FORCE_APP_PROFILE_RESOLUTION = "com.moonbench.bifrost.FORCE_APP_PROFILE_RESOLUTION"
         const val EXTRA_ALLOW_BACKGROUND_RUN = "allowBackgroundRun"
         const val EXTRA_BATTERY_OVERRIDE_WHEN_PLUGGED = "batteryOverrideWhenPlugged"
         const val EXTRA_PERSISTENT_NOTIFICATION = "persistentNotification"
+        private const val EXTRA_BATTERY_LOW_COLOR_OVERRIDE = "batteryLowColorOverride"
+        private const val EXTRA_BATTERY_MID_COLOR_OVERRIDE = "batteryMidColorOverride"
+        private const val EXTRA_BATTERY_HIGH_COLOR_OVERRIDE = "batteryHighColorOverride"
+        private const val EXTRA_CPU_COOL_COLOR_OVERRIDE = "cpuCoolColorOverride"
+        private const val EXTRA_CPU_WARM_COLOR_OVERRIDE = "cpuWarmColorOverride"
+        private const val EXTRA_CPU_HOT_COLOR_OVERRIDE = "cpuHotColorOverride"
+        private const val COLOR_OVERRIDE_UNSET = Int.MIN_VALUE
         var isRunning = false
     }
 
@@ -91,6 +99,12 @@ class LEDService : Service() {
     private var currentBreatheWhenCharging: Boolean = false
     private var currentIndicateChargingSpeed: Boolean = false
     private var currentFlashWhenReady: Boolean = false
+    private var currentBatteryLowColorOverride: Int? = null
+    private var currentBatteryMidColorOverride: Int? = null
+    private var currentBatteryHighColorOverride: Int? = null
+    private var currentCpuCoolColorOverride: Int? = null
+    private var currentCpuWarmColorOverride: Int? = null
+    private var currentCpuHotColorOverride: Int? = null
     private var currentBatteryOverrideWhenPlugged: Boolean = false
     private var currentPersistentNotification: Boolean = true
     private var allowBackgroundRun: Boolean = false
@@ -103,6 +117,7 @@ class LEDService : Service() {
     private var pendingTransitionRunnable: Runnable? = null
     private var pendingProjectionRunnable: Runnable? = null
     private var pendingShutdownRunnable: Runnable? = null
+    private var isAppProfileSuppressed: Boolean = false
 
     private val batteryStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -129,7 +144,12 @@ class LEDService : Service() {
                 cleanupAndStop()
             } else {
                 checkAutoProfileSwitch()
-                handler.postDelayed(this, ACTIVITY_CHECK_INTERVAL_MS)
+                val nextDelay = if (appProfileManager.isEnabled) {
+                    ACTIVITY_CHECK_INTERVAL_APP_PROFILE_MS
+                } else {
+                    ACTIVITY_CHECK_INTERVAL_MS
+                }
+                handler.postDelayed(this, nextDelay)
             }
         }
     }
@@ -157,6 +177,13 @@ class LEDService : Service() {
 
         if (intent.action == ACTION_UPDATE_PARAMS) {
             handleUpdateParams(intent)
+            return START_NOT_STICKY
+        }
+
+        if (intent.action == ACTION_FORCE_APP_PROFILE_RESOLUTION) {
+            if (isRunning) {
+                checkAutoProfileSwitch()
+            }
             return START_NOT_STICKY
         }
 
@@ -205,6 +232,12 @@ class LEDService : Service() {
         currentBreatheWhenCharging = intent.getBooleanExtra("breatheWhenCharging", false)
         currentIndicateChargingSpeed = intent.getBooleanExtra("indicateChargingSpeed", false)
         currentFlashWhenReady = intent.getBooleanExtra("flashWhenReady", false)
+        currentBatteryLowColorOverride = parseOptionalColor(intent, EXTRA_BATTERY_LOW_COLOR_OVERRIDE)
+        currentBatteryMidColorOverride = parseOptionalColor(intent, EXTRA_BATTERY_MID_COLOR_OVERRIDE)
+        currentBatteryHighColorOverride = parseOptionalColor(intent, EXTRA_BATTERY_HIGH_COLOR_OVERRIDE)
+        currentCpuCoolColorOverride = parseOptionalColor(intent, EXTRA_CPU_COOL_COLOR_OVERRIDE)
+        currentCpuWarmColorOverride = parseOptionalColor(intent, EXTRA_CPU_WARM_COLOR_OVERRIDE)
+        currentCpuHotColorOverride = parseOptionalColor(intent, EXTRA_CPU_HOT_COLOR_OVERRIDE)
         currentAmbilightDisplayId = intent.getIntExtra("ambilightDisplayId", Display.DEFAULT_DISPLAY)
 
         lastProjectionResultCode = intent.getIntExtra("resultCode", Activity.RESULT_OK)
@@ -220,16 +253,25 @@ class LEDService : Service() {
         currentSpeed = speed
         currentSmoothness = smoothness
         currentSensitivity = sensitivity
+        isAppProfileSuppressed = false
 
         refreshPluggedStateSnapshot()
 
-        restartAnimationForCurrentState(force = true)
+        if (appProfileManager.isEnabled) {
+            checkAutoProfileSwitch()
+            if (!isAppProfileSuppressed && currentAnimation == null) {
+                restartAnimationForCurrentState(force = true)
+            }
+        } else {
+            restartAnimationForCurrentState(force = true)
+        }
 
         return START_NOT_STICKY
     }
 
     private fun handleUpdateParams(intent: Intent) {
         if (!isRunning) return
+        isAppProfileSuppressed = false
         val animation = currentAnimation
 
         if (intent.hasExtra("animationColor") || intent.hasExtra("animationRightColor")) {
@@ -326,6 +368,53 @@ class LEDService : Service() {
             }
         }
 
+        if (
+            intent.hasExtra(EXTRA_BATTERY_LOW_COLOR_OVERRIDE) ||
+            intent.hasExtra(EXTRA_BATTERY_MID_COLOR_OVERRIDE) ||
+            intent.hasExtra(EXTRA_BATTERY_HIGH_COLOR_OVERRIDE) ||
+            intent.hasExtra(EXTRA_CPU_COOL_COLOR_OVERRIDE) ||
+            intent.hasExtra(EXTRA_CPU_WARM_COLOR_OVERRIDE) ||
+            intent.hasExtra(EXTRA_CPU_HOT_COLOR_OVERRIDE)
+        ) {
+            var paletteChanged = false
+
+            val newBatteryLow = parseOptionalColor(intent, EXTRA_BATTERY_LOW_COLOR_OVERRIDE)
+            val newBatteryMid = parseOptionalColor(intent, EXTRA_BATTERY_MID_COLOR_OVERRIDE)
+            val newBatteryHigh = parseOptionalColor(intent, EXTRA_BATTERY_HIGH_COLOR_OVERRIDE)
+            val newCpuCool = parseOptionalColor(intent, EXTRA_CPU_COOL_COLOR_OVERRIDE)
+            val newCpuWarm = parseOptionalColor(intent, EXTRA_CPU_WARM_COLOR_OVERRIDE)
+            val newCpuHot = parseOptionalColor(intent, EXTRA_CPU_HOT_COLOR_OVERRIDE)
+
+            if (newBatteryLow != currentBatteryLowColorOverride) {
+                currentBatteryLowColorOverride = newBatteryLow
+                paletteChanged = true
+            }
+            if (newBatteryMid != currentBatteryMidColorOverride) {
+                currentBatteryMidColorOverride = newBatteryMid
+                paletteChanged = true
+            }
+            if (newBatteryHigh != currentBatteryHighColorOverride) {
+                currentBatteryHighColorOverride = newBatteryHigh
+                paletteChanged = true
+            }
+            if (newCpuCool != currentCpuCoolColorOverride) {
+                currentCpuCoolColorOverride = newCpuCool
+                paletteChanged = true
+            }
+            if (newCpuWarm != currentCpuWarmColorOverride) {
+                currentCpuWarmColorOverride = newCpuWarm
+                paletteChanged = true
+            }
+            if (newCpuHot != currentCpuHotColorOverride) {
+                currentCpuHotColorOverride = newCpuHot
+                paletteChanged = true
+            }
+
+            if (paletteChanged) {
+                restartAnimationForCurrentState(force = true)
+            }
+        }
+
         if (intent.hasExtra(EXTRA_BATTERY_OVERRIDE_WHEN_PLUGGED)) {
             val newBatteryOverrideWhenPlugged = intent.getBooleanExtra(
                 EXTRA_BATTERY_OVERRIDE_WHEN_PLUGGED,
@@ -353,6 +442,11 @@ class LEDService : Service() {
 
     private fun restartAnimationForCurrentState(force: Boolean = false) {
         if (!isRunning || isStopping.get()) return
+
+        if (isAppProfileSuppressed && !(currentBatteryOverrideWhenPlugged && isDevicePluggedIn)) {
+            stopCurrentAnimation()
+            return
+        }
 
         val effectiveType = resolveEffectiveAnimationType()
         if (!force && effectiveType == activeAnimationType) return
@@ -530,17 +624,26 @@ class LEDService : Service() {
     private fun checkAutoProfileSwitch() {
         if (!isRunning || isTransitioning.get() || isStopping.get()) return
 
-        val preset = appProfileManager.checkForSwitch(this) ?: return
+        val switchResult = appProfileManager.checkForSwitch(this) ?: return
 
         // Keep the UI in sync by tracking which preset is active when auto-switch is enabled.
-        prefs.edit().putString(PREF_KEY_LAST_PRESET, preset.name).apply()
+        prefs.edit().putString(PREF_KEY_LAST_PRESET, switchResult.presetName.orEmpty()).apply()
 
         // While the plugged-in battery override is active, keep tracking foreground-app
         // changes but do not apply the preset switch until the override is lifted.
         if (currentBatteryOverrideWhenPlugged && isDevicePluggedIn) return
 
+        val preset = switchResult.preset
+        if (preset == null) {
+            isAppProfileSuppressed = true
+            stopCurrentAnimation()
+            return
+        }
+
         val needsMP = needsMediaProjection(preset.animationType)
         if (needsMP && mediaProjection == null) return
+
+        isAppProfileSuppressed = false
 
         currentAnimationType = preset.animationType
         currentProfile = preset.performanceProfile
@@ -556,7 +659,19 @@ class LEDService : Service() {
         currentBreatheWhenCharging = preset.breatheWhenCharging
         currentIndicateChargingSpeed = preset.indicateChargingSpeed
         currentFlashWhenReady = preset.flashWhenReady
+        currentBatteryLowColorOverride = preset.batteryLowColorOverride
+        currentBatteryMidColorOverride = preset.batteryMidColorOverride
+        currentBatteryHighColorOverride = preset.batteryHighColorOverride
+        currentCpuCoolColorOverride = preset.cpuCoolColorOverride
+        currentCpuWarmColorOverride = preset.cpuWarmColorOverride
+        currentCpuHotColorOverride = preset.cpuHotColorOverride
         restartAnimationForCurrentState(force = true)
+    }
+
+    private fun parseOptionalColor(intent: Intent, key: String): Int? {
+        if (!intent.hasExtra(key)) return null
+        val value = intent.getIntExtra(key, COLOR_OVERRIDE_UNSET)
+        return value.takeUnless { it == COLOR_OVERRIDE_UNSET }
     }
 
     private fun isActivityRunning(): Boolean {
@@ -607,6 +722,7 @@ class LEDService : Service() {
             allowBackgroundRun = false
             isTransitioning.set(false)
             activeAnimationType = null
+            isAppProfileSuppressed = false
 
             stopCurrentAnimation()
 
@@ -807,9 +923,17 @@ class LEDService : Service() {
                 this,
                 currentBreatheWhenCharging,
                 currentIndicateChargingSpeed,
-                currentFlashWhenReady
+                currentFlashWhenReady,
+                currentBatteryLowColorOverride,
+                currentBatteryMidColorOverride,
+                currentBatteryHighColorOverride
             )
-            LedAnimationType.CPU_TEMPERATURE -> CpuTemperatureAnimation(ledController)
+            LedAnimationType.CPU_TEMPERATURE -> CpuTemperatureAnimation(
+                ledController,
+                coolColorOverride = currentCpuCoolColorOverride,
+                warmColorOverride = currentCpuWarmColorOverride,
+                hotColorOverride = currentCpuHotColorOverride
+            )
             LedAnimationType.STATIC -> StaticAnimation(ledController, color, rightColor)
             LedAnimationType.BREATH -> BreathAnimation(ledController, color, rightColor)
             LedAnimationType.RAINBOW -> RainbowAnimation(ledController)
