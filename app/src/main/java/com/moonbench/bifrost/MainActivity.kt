@@ -18,9 +18,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.text.SpannableString
-import android.text.Spanned
-import android.text.style.ForegroundColorSpan
 import android.view.Display
 import android.view.DragEvent
 import android.view.LayoutInflater
@@ -62,15 +59,13 @@ import com.moonbench.bifrost.services.ServiceController
 import com.moonbench.bifrost.tools.DeviceInfo
 import com.moonbench.bifrost.tools.PerformanceProfile
 import com.moonbench.bifrost.ui.AnimatedRainbowDrawable
+import com.moonbench.bifrost.ui.BifrostTitleAnimator
 import com.moonbench.bifrost.ui.BifrostAlertDialog
 import com.moonbench.bifrost.ui.ColorPickerDialog
 import com.moonbench.bifrost.ui.LockableHorizontalScrollView
 import com.moonbench.bifrost.ui.RagnarokWarningDialog
-import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.cos
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 class MainActivity : AppCompatActivity() {
 
@@ -141,7 +136,6 @@ class MainActivity : AppCompatActivity() {
         // Note: this key is shared with PresetController for backward compatibility.
         // Do not change unless updating persistence logic across components.
 
-        private const val TITLE_INTRO_ANIMATION_MS = 3200L
         private const val PREF_FIRST_LAUNCH_ALERT_SHOWN = "first_launch_alert_shown"
         private const val PREF_THOR_BOTTOM_SCREEN = "thor_bottom_screen"
         private const val PREF_THOR_AMBILIGHT_BOTTOM_SCREEN = "thor_ambilight_bottom_screen"
@@ -170,10 +164,8 @@ class MainActivity : AppCompatActivity() {
     private var isAwaitingPermissionResult = false
     private var isUpdatingFromPreset = false
     private var rainbowDrawable: AnimatedRainbowDrawable? = null
-    private var titleIntroAnimator: ValueAnimator? = null
-    private var headerSettleAnimator: ValueAnimator? = null
+    private var titleAnimator: BifrostTitleAnimator? = null
     private var isAppInitialized = false
-    private var bifrostTitleLabel: String = ""
     private var selectedCoverFlowIndex: Int = 0
     private var coverFlowSnapRunnable: Runnable? = null
     private var suppressNextCoverFlowSnap: Boolean = false
@@ -379,7 +371,8 @@ class MainActivity : AppCompatActivity() {
         setupBreatheWhenChargingSwitch()
         setupChargingSpeedIndicatorSwitch()
         setupFlashWhenReadySwitch()
-        setupRainbowTitleText()
+        titleAnimator = BifrostTitleAnimator(bifrostTitleText, bifrostLogoView)
+        titleAnimator?.setup()
         appProfileManager = AppProfileManager(prefs)
         setupAppProfileFeature()
         setupAutoStartupSwitch()
@@ -1151,10 +1144,7 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         if (!isAppInitialized) return
-        titleIntroAnimator?.cancel()
-        headerSettleAnimator?.cancel()
-        titleIntroAnimator = null
-        headerSettleAnimator = null
+        titleAnimator?.teardown()
         homeContainer.animate().cancel()
         homeContainer.alpha = if (settingsOverlay.visibility == View.VISIBLE) SETTINGS_HOME_DIM_ALPHA else 1f
         settingsOverlay.animate().cancel()
@@ -1171,10 +1161,8 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         if (!isAppInitialized) return
-        titleIntroAnimator?.cancel()
-        headerSettleAnimator?.cancel()
-        titleIntroAnimator = null
-        headerSettleAnimator = null
+        titleAnimator?.teardown()
+        titleAnimator = null
         homeContainer.animate().cancel()
         homeContainer.alpha = 1f
         settingsOverlay.animate().cancel()
@@ -1190,212 +1178,8 @@ class MainActivity : AppCompatActivity() {
         rainbowDrawable = null
     }
 
-    private fun setupRainbowTitleText() {
-        bifrostTitleLabel = bifrostTitleText.text.toString()
-        if (bifrostTitleLabel.isBlank()) return
-
-        bifrostLogoView.setOnClickListener { playBifrostHeaderAnimation() }
-        bifrostTitleText.setOnClickListener { playBifrostHeaderAnimation() }
-        resetBifrostHeaderAnimationState()
-        playBifrostHeaderAnimation()
-    }
-
-    private fun applyRainbowTitlePhase(text: String, phaseDegrees: Float) {
-        val rainbowText = SpannableString(text)
-        val maxIndex = (text.length - 1).coerceAtLeast(1)
-
-        text.indices.forEach { index ->
-            if (text[index].isWhitespace()) return@forEach
-
-            val hue = (phaseDegrees + (360f * index / maxIndex)) % 360f
-            val color = Color.HSVToColor(floatArrayOf(hue, 0.82f, 1f))
-            rainbowText.setSpan(
-                ForegroundColorSpan(color),
-                index,
-                index + 1,
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-
-        bifrostTitleText.text = rainbowText
-    }
-
-    private fun applyWatercolorTitlePhase(text: String, phaseDegrees: Float) {
-        val watercolorText = SpannableString(text)
-        val maxIndex = (text.length - 1).coerceAtLeast(1)
-
-        text.indices.forEach { index ->
-            if (text[index].isWhitespace()) return@forEach
-
-            val letterProgress = index / maxIndex.toFloat()
-            val hue = (phaseDegrees + 300f * letterProgress + 10f * sin(letterProgress * PI).toFloat()) % 360f
-            val saturation = (0.28f + 0.14f * ((sin(letterProgress * PI * 3.0) + 1.0) / 2.0).toFloat())
-                .coerceIn(0f, 1f)
-            val value = (0.92f + 0.08f * ((cos(letterProgress * PI * 2.0) + 1.0) / 2.0).toFloat())
-                .coerceIn(0f, 1f)
-            val alpha = (224 + 31 * ((sin(letterProgress * PI * 2.5) + 1.0) / 2.0)).roundToInt()
-                .coerceIn(0, 255)
-            val color = Color.HSVToColor(alpha, floatArrayOf(hue, saturation, value))
-
-            watercolorText.setSpan(
-                ForegroundColorSpan(color),
-                index,
-                index + 1,
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-
-        bifrostTitleText.text = watercolorText
-    }
-
     private fun playBifrostHeaderAnimation() {
-        if (bifrostTitleLabel.isBlank()) return
-
-        titleIntroAnimator?.cancel()
-        headerSettleAnimator?.cancel()
-
-        titleIntroAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = TITLE_INTRO_ANIMATION_MS
-            interpolator = LinearInterpolator()
-            addUpdateListener { animator ->
-                val progress = animator.animatedValue as Float
-                val phaseDegrees = progress * 720f
-                applyRainbowTitlePhase(bifrostTitleLabel, phaseDegrees)
-                applyBifrostLogoAnimationFrame(progress, phaseDegrees)
-            }
-            addListener(object : AnimatorListenerAdapter() {
-                private var wasCanceled = false
-
-                override fun onAnimationCancel(animation: Animator) {
-                    wasCanceled = true
-                    settleHeaderToStillState()
-                }
-
-                override fun onAnimationEnd(animation: Animator) {
-                    titleIntroAnimator = null
-                    if (!wasCanceled) {
-                        settleHeaderToStillState()
-                    }
-                }
-            })
-            start()
-        }
-    }
-
-    private fun applyBifrostLogoAnimationFrame(progress: Float, phaseDegrees: Float) {
-        val spinWave = sin(progress * PI * 10.0).toFloat()
-        val pulseWave = ((1.0 - cos(progress * PI * 6.0)) / 2.0).toFloat()
-        val driftWave = sin(progress * PI * 4.0).toFloat()
-
-        bifrostLogoView.rotation = 16f * spinWave
-        bifrostLogoView.scaleX = 1f + (0.12f * pulseWave)
-        bifrostLogoView.scaleY = 1f + (0.12f * pulseWave)
-        bifrostLogoView.translationY = -10f * driftWave
-        bifrostLogoView.alpha = 0.9f + (0.1f * pulseWave)
-    }
-
-    private fun resetBifrostHeaderAnimationState() {
-        if (bifrostTitleLabel.isBlank()) return
-
-        applyWatercolorTitlePhase(bifrostTitleLabel, 18f)
-        bifrostLogoView.rotation = 0f
-        bifrostLogoView.scaleX = 1f
-        bifrostLogoView.scaleY = 1f
-        bifrostLogoView.translationY = 0f
-        bifrostLogoView.alpha = 1f
-        bifrostLogoView.clearColorFilter()
-    }
-
-    private fun settleHeaderToStillState() {
-        if (bifrostTitleLabel.isBlank()) return
-
-        headerSettleAnimator?.cancel()
-
-        bifrostLogoView.animate()
-            .rotation(0f)
-            .scaleX(1f)
-            .scaleY(1f)
-            .translationY(0f)
-            .alpha(1f)
-            .setDuration(400L)
-            .setInterpolator(DecelerateInterpolator())
-            .withEndAction { bifrostLogoView.clearColorFilter() }
-            .start()
-
-        val rainbowColors = getRainbowColors(bifrostTitleLabel, 720f)
-        val watercolorColors = getWatercolorColors(bifrostTitleLabel, 18f)
-
-        headerSettleAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 400L
-            interpolator = DecelerateInterpolator()
-            addUpdateListener { animator ->
-                val t = animator.animatedValue as Float
-                applyBlendedTitleColors(rainbowColors, watercolorColors, t)
-            }
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    applyWatercolorTitlePhase(bifrostTitleLabel, 18f)
-                }
-            })
-            start()
-        }
-    }
-
-    private fun getRainbowColors(text: String, phaseDegrees: Float): IntArray {
-        val colors = IntArray(text.length)
-        val maxIndex = (text.length - 1).coerceAtLeast(1)
-        text.indices.forEach { index ->
-            if (text[index].isWhitespace()) {
-                colors[index] = Color.TRANSPARENT
-            } else {
-                val hue = (phaseDegrees + (360f * index / maxIndex)) % 360f
-                colors[index] = Color.HSVToColor(floatArrayOf(hue, 0.82f, 1f))
-            }
-        }
-        return colors
-    }
-
-    private fun getWatercolorColors(text: String, phaseDegrees: Float): IntArray {
-        val colors = IntArray(text.length)
-        val maxIndex = (text.length - 1).coerceAtLeast(1)
-        text.indices.forEach { index ->
-            if (text[index].isWhitespace()) {
-                colors[index] = Color.TRANSPARENT
-            } else {
-                val letterProgress = index / maxIndex.toFloat()
-                val hue = (phaseDegrees + 300f * letterProgress + 10f * sin(letterProgress * PI).toFloat()) % 360f
-                val saturation = (0.28f + 0.14f * ((sin(letterProgress * PI * 3.0) + 1.0) / 2.0).toFloat())
-                    .coerceIn(0f, 1f)
-                val value = (0.92f + 0.08f * ((cos(letterProgress * PI * 2.0) + 1.0) / 2.0).toFloat())
-                    .coerceIn(0f, 1f)
-                val alpha = (224 + 31 * ((sin(letterProgress * PI * 2.5) + 1.0) / 2.0)).roundToInt()
-                    .coerceIn(0, 255)
-                colors[index] = Color.HSVToColor(alpha, floatArrayOf(hue, saturation, value))
-            }
-        }
-        return colors
-    }
-
-    private fun applyBlendedTitleColors(startColors: IntArray, endColors: IntArray, t: Float) {
-        val rainbowText = SpannableString(bifrostTitleLabel)
-        val blend = t.coerceIn(0f, 1f)
-        val maxIndex = (bifrostTitleLabel.length - 1).coerceAtLeast(1)
-
-        bifrostTitleLabel.indices.forEach { index ->
-            if (bifrostTitleLabel[index].isWhitespace()) return@forEach
-            val blended = androidx.core.graphics.ColorUtils.blendARGB(
-                startColors.getOrNull(index) ?: Color.WHITE,
-                endColors.getOrNull(index) ?: Color.WHITE,
-                blend
-            )
-            rainbowText.setSpan(
-                ForegroundColorSpan(blended),
-                index,
-                index + 1,
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-        bifrostTitleText.text = rainbowText
+        titleAnimator?.play()
     }
 
     private fun setupAnimationSpinner() {
