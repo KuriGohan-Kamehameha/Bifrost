@@ -2,6 +2,7 @@ package com.moonbench.bifrost.animations
 
 import android.graphics.Color
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import com.moonbench.bifrost.tools.LedController
 import java.io.File
@@ -46,6 +47,10 @@ class CpuTemperatureAnimation(
     private val handler = Handler(Looper.getMainLooper())
     private val thermalReader = CpuThermalReader()
 
+    // Background thread for sysfs file I/O so the main looper is never blocked
+    private val thermalThread = HandlerThread("CpuThermalRead")
+    private var thermalHandler: Handler? = null
+
     private var targetBrightness: Int = 255
     private var currentBrightness: Int = 255
     private var targetColor: Int = TEMP_POINTS.first().color
@@ -53,23 +58,28 @@ class CpuTemperatureAnimation(
     private var lastKnownTemperatureC: Float? = null
     private var lastTemperatureReadAt: Long = 0L
 
+    /** Dispatches a thermal read to the background thread if the interval has elapsed. */
+    private fun scheduleThermalRead() {
+        val now = System.currentTimeMillis()
+        if (now - lastTemperatureReadAt < TEMP_READ_INTERVAL_MS) return
+        lastTemperatureReadAt = now   // mark dispatch time to prevent concurrent reads
+        thermalHandler?.post {
+            val raw = thermalReader.readCpuTemperatureC()
+            handler.post {
+                if (isRunning && raw != null) {
+                    val q = quantizeToHalfDegree(raw)
+                    lastKnownTemperatureC = q
+                    targetColor = colorForTemperature(q)
+                }
+            }
+        }
+    }
+
     private val updateRunnable = object : Runnable {
         override fun run() {
             if (!isRunning) return
 
-            val now = System.currentTimeMillis()
-            val latestTemperatureC = if (now - lastTemperatureReadAt >= TEMP_READ_INTERVAL_MS) {
-                lastTemperatureReadAt = now
-                thermalReader.readCpuTemperatureC() ?: lastKnownTemperatureC
-            } else {
-                lastKnownTemperatureC
-            }
-
-            if (latestTemperatureC != null) {
-                val quantizedTemperature = quantizeToHalfDegree(latestTemperatureC)
-                lastKnownTemperatureC = quantizedTemperature
-                targetColor = colorForTemperature(quantizedTemperature)
-            }
+            scheduleThermalRead()
 
             currentColor = lerpColor(currentColor, targetColor, COLOR_LERP_FACTOR)
             currentBrightness = lerpBrightnessInt(currentBrightness, targetBrightness, BRIGHTNESS_LERP_FACTOR)
@@ -83,23 +93,38 @@ class CpuTemperatureAnimation(
         if (isRunning) return
         isRunning = true
 
-        val initialTemperatureC = thermalReader.readCpuTemperatureC()
-        if (initialTemperatureC != null) {
-            val quantizedTemperature = quantizeToHalfDegree(initialTemperatureC)
-            lastKnownTemperatureC = quantizedTemperature
-            targetColor = colorForTemperature(quantizedTemperature)
-            currentColor = targetColor
-        }
+        thermalThread.start()
+        thermalHandler = Handler(thermalThread.looper)
 
         currentBrightness = targetBrightness
-        applyLeds(currentColor, currentBrightness)
-        handler.post(updateRunnable)
+
+        // Initial temperature read on the background thread; start the update loop
+        // once the first reading is available so the initial color is correct.
+        thermalHandler!!.post {
+            val raw = thermalReader.readCpuTemperatureC()
+            handler.post {
+                if (isRunning) {
+                    if (raw != null) {
+                        val q = quantizeToHalfDegree(raw)
+                        lastKnownTemperatureC = q
+                        targetColor = colorForTemperature(q)
+                        currentColor = targetColor
+                    }
+                    lastTemperatureReadAt = System.currentTimeMillis()
+                    applyLeds(currentColor, currentBrightness)
+                    handler.post(updateRunnable)
+                }
+            }
+        }
     }
 
     override fun stop() {
         if (!isRunning) return
         isRunning = false
         handler.removeCallbacks(updateRunnable)
+        thermalHandler?.removeCallbacksAndMessages(null)
+        thermalThread.quitSafely()
+        thermalHandler = null
         currentBrightness = 0
         applyLeds(Color.BLACK, 0)
     }
@@ -200,13 +225,16 @@ private class CpuThermalReader {
         var bestTemp: Float? = null
         var bestTempFile: File? = null
 
+        // Use a for loop with break so we actually stop after MAX_ZONE_SCAN zones.
+        // forEach { return@forEach } is a continue, not a break, and would still
+        // iterate every remaining zone doing nothing.
         var scanned = 0
-        zones.forEach { zone ->
-            if (scanned >= MAX_ZONE_SCAN) return@forEach
+        for (zone in zones) {
+            if (scanned >= MAX_ZONE_SCAN) break
             scanned++
             val type = zone.resolve("type").safeReadText()?.trim()?.lowercase().orEmpty()
             val tempFile = zone.resolve("temp")
-            val temperature = parseTemperature(tempFile) ?: return@forEach
+            val temperature = parseTemperature(tempFile) ?: continue
             val score = scoreZoneType(type)
 
             if (score > bestScore || (score == bestScore && (bestTemp == null || temperature > (bestTemp ?: Float.NEGATIVE_INFINITY)))) {

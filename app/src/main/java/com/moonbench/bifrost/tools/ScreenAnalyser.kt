@@ -55,7 +55,7 @@ class ScreenAnalyzer(
     var performanceProfile: PerformanceProfile = PerformanceProfile.HIGH,
     var useCustomSampling: Boolean = false,
     var useSingleColor: Boolean = false,
-    var saturationBoost: Float = 0.0f,
+    initialSaturationBoost: Float = 0.0f,
     initialTopPixelPercentage: Float = 0.3f,
     private val onColorsAnalyzed: (ScreenColors) -> Unit
 ) {
@@ -63,6 +63,10 @@ class ScreenAnalyzer(
         set(value) {
             field = value.coerceIn(0.05f, 1f)
         }
+
+    // Written from main thread, read from ScreenCapture HandlerThread — must be @Volatile
+    @Volatile
+    var saturationBoost: Float = initialSaturationBoost
 
     private var captureWidth = DEFAULT_CAPTURE_WIDTH
     private var captureHeight = DEFAULT_CAPTURE_HEIGHT
@@ -146,19 +150,24 @@ class ScreenAnalyzer(
         if (!isRunning) return
         isRunning = false
 
-        virtualDisplay?.release()
-        imageReader?.close()
-        handlerThread?.quitSafely()
-
+        // Unregister first so the projection stop callback cannot re-enter
         projectionCallback?.let {
-            mediaProjection.unregisterCallback(it)
+            runCatching { mediaProjection.unregisterCallback(it) }
         }
+        projectionCallback = null
 
+        // Stop new frames before draining the handler queue
+        virtualDisplay?.release()
         virtualDisplay = null
-        imageReader = null
+
+        // Drain and stop the capture thread before closing the reader so that
+        // any in-flight onImageAvailable callback cannot race against close()
+        handlerThread?.quitSafely()
         handlerThread = null
         handler = null
-        projectionCallback = null
+
+        imageReader?.close()
+        imageReader = null
         lastEmittedColors = null
     }
 

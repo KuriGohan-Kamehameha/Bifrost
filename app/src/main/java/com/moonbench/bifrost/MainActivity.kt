@@ -5,10 +5,11 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.Manifest
 import android.app.ActivityOptions
+import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.ColorDrawable
 import android.hardware.display.DisplayManager
 import android.media.projection.MediaProjectionManager
@@ -18,13 +19,15 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.view.Display
 import android.view.DragEvent
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.view.ViewConfiguration
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.BaseAdapter
@@ -40,7 +43,6 @@ import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import android.view.animation.OvershootInterpolator
-import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -48,7 +50,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.switchmaterial.SwitchMaterial
@@ -62,16 +63,15 @@ import com.moonbench.bifrost.services.ServiceController
 import com.moonbench.bifrost.tools.DeviceInfo
 import com.moonbench.bifrost.tools.PerformanceProfile
 import com.moonbench.bifrost.ui.AnimatedRainbowDrawable
-import com.moonbench.bifrost.ui.BifrostTitleAnimator
 import com.moonbench.bifrost.ui.BifrostAlertDialog
 import com.moonbench.bifrost.ui.ColorPickerDialog
 import com.moonbench.bifrost.ui.LockableHorizontalScrollView
 import com.moonbench.bifrost.ui.RagnarokWarningDialog
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.roundToInt
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import kotlin.math.sin
 
 class MainActivity : AppCompatActivity() {
 
@@ -83,20 +83,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var animationSpinner: Spinner
     private lateinit var profileSpinner: Spinner
     private lateinit var presetSpinner: Spinner
+    private lateinit var themeSpinner: Spinner
     private lateinit var savePresetButton: MaterialButton
     private lateinit var modifyPresetButton: MaterialButton
     private lateinit var deletePresetButton: MaterialButton
-    private lateinit var customizePresetArtworkButton: MaterialButton
-    private lateinit var exportPresetsButton: MaterialButton
-    private lateinit var importPresetsButton: MaterialButton
+    private lateinit var exportThemeButton: MaterialButton
+    private lateinit var importThemeButton: MaterialButton
     private lateinit var colorButton: MaterialButton
     private lateinit var rightColorButton: MaterialButton
-    private lateinit var batteryLowColorButton: MaterialButton
-    private lateinit var batteryMidColorButton: MaterialButton
-    private lateinit var batteryHighColorButton: MaterialButton
-    private lateinit var cpuCoolColorButton: MaterialButton
-    private lateinit var cpuWarmColorButton: MaterialButton
-    private lateinit var cpuHotColorButton: MaterialButton
     private lateinit var brightnessSeekBar: SeekBar
     private lateinit var speedSeekBar: SeekBar
     private lateinit var smoothnessSeekBar: SeekBar
@@ -109,7 +103,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var flashWhenReadySwitch: SwitchMaterial
     private lateinit var appProfileSwitch: SwitchMaterial
     private lateinit var homeAppProfileSwitch: SwitchMaterial
-    private lateinit var appProfileDefaultSwitch: SwitchMaterial
     private lateinit var assignAppButton: MaterialButton
     private lateinit var manageAppsButton: MaterialButton
     private lateinit var settingsOverlay: View
@@ -145,15 +138,13 @@ class MainActivity : AppCompatActivity() {
         private const val SETTINGS_HOME_DIM_ALPHA = 0.84f
         private const val COVER_FLOW_TILE_SIZE_DP = 176
         private const val COVER_FLOW_TILE_GAP_DP = 10
-        private const val COVER_FLOW_CREATE_TAG = -1
-        private const val COVER_FLOW_SNAP_SETTLE_DELAY_MS = 100L
         private const val APP_PROFILE_SYNC_INTERVAL_MS = 1200L
         private const val PREF_KEY_LAST_PRESET = "last_preset_name"
-        private const val PREF_APP_PROFILE_INFO_SHOWN = "app_profile_info_shown"
 
         // Note: this key is shared with PresetController for backward compatibility.
         // Do not change unless updating persistence logic across components.
 
+        private const val TITLE_INTRO_ANIMATION_MS = 3200L
         private const val PREF_FIRST_LAUNCH_ALERT_SHOWN = "first_launch_alert_shown"
         private const val PREF_THOR_BOTTOM_SCREEN = "thor_bottom_screen"
         private const val PREF_THOR_AMBILIGHT_BOTTOM_SCREEN = "thor_ambilight_bottom_screen"
@@ -161,32 +152,12 @@ class MainActivity : AppCompatActivity() {
         private const val PREF_PERSISTENT_NOTIFICATION = "persistent_notification_enabled"
         private const val EXTRA_DISPLAY_RELAUNCH_ATTEMPT = "display_relaunch_attempt"
         private const val MAX_DISPLAY_RELAUNCH_ATTEMPTS = 3
-        private const val COLOR_OVERRIDE_UNSET = Int.MIN_VALUE
-        private const val EXTRA_BATTERY_LOW_COLOR_OVERRIDE = "batteryLowColorOverride"
-        private const val EXTRA_BATTERY_MID_COLOR_OVERRIDE = "batteryMidColorOverride"
-        private const val EXTRA_BATTERY_HIGH_COLOR_OVERRIDE = "batteryHighColorOverride"
-        private const val EXTRA_CPU_COOL_COLOR_OVERRIDE = "cpuCoolColorOverride"
-        private const val EXTRA_CPU_WARM_COLOR_OVERRIDE = "cpuWarmColorOverride"
-        private const val EXTRA_CPU_HOT_COLOR_OVERRIDE = "cpuHotColorOverride"
-
-        private val DEFAULT_BATTERY_LOW_COLOR = Color.rgb(255, 0, 0)
-        private val DEFAULT_BATTERY_MID_COLOR = Color.rgb(255, 255, 0)
-        private val DEFAULT_BATTERY_HIGH_COLOR = Color.rgb(0, 255, 0)
-        private val DEFAULT_CPU_COOL_COLOR = Color.rgb(0, 120, 255)
-        private val DEFAULT_CPU_WARM_COLOR = Color.rgb(255, 215, 0)
-        private val DEFAULT_CPU_HOT_COLOR = Color.rgb(255, 0, 0)
     }
 
     private var selectedAnimationType: LedAnimationType = LedAnimationType.AMBILIGHT
     private var selectedProfile: PerformanceProfile = PerformanceProfile.HIGH
     private var selectedColor: Int = Color.WHITE
     private var selectedRightColor: Int = Color.WHITE
-    private var selectedBatteryLowColorOverride: Int? = null
-    private var selectedBatteryMidColorOverride: Int? = null
-    private var selectedBatteryHighColorOverride: Int? = null
-    private var selectedCpuCoolColorOverride: Int? = null
-    private var selectedCpuWarmColorOverride: Int? = null
-    private var selectedCpuHotColorOverride: Int? = null
     private var selectedBrightness: Int = 255
     private var selectedSpeed: Float = 0.5f
     private var selectedSmoothness: Float = 0.5f
@@ -202,21 +173,24 @@ class MainActivity : AppCompatActivity() {
     private var isAwaitingPermissionResult = false
     private var isUpdatingFromPreset = false
     private var rainbowDrawable: AnimatedRainbowDrawable? = null
-    private var titleAnimator: BifrostTitleAnimator? = null
+    private var titleIntroAnimator: ValueAnimator? = null
+    private var headerSettleAnimator: ValueAnimator? = null
     private var isAppInitialized = false
+    private var bifrostTitleLabel: String = ""
     private var selectedCoverFlowIndex: Int = 0
     private var coverFlowSnapRunnable: Runnable? = null
     private var suppressNextCoverFlowSnap: Boolean = false
     private var isCoverFlowDragging: Boolean = false
-    private var isCoverFlowTouching: Boolean = false
-    private var lastCoverFlowScrollXForSnap: Int = 0
     private var isSettingsOverlayAnimating: Boolean = false
     private var isSyncingAppProfileSwitches: Boolean = false
-    private var isSyncingAppProfileDefaultSwitch: Boolean = false
     private var pendingPresetArtworkIndex: Int? = null
     private var presetArtworkSheetDialog: BottomSheetDialog? = null
     private var appProfileSyncRunnable: Runnable? = null
     private var resumeStateSyncRunnable: Runnable? = null
+    private lateinit var themeRepository: BifrostThemeRepository
+    private var availableThemes: List<BifrostUiTheme> = emptyList()
+    private var selectedUiTheme: BifrostUiTheme = BifrostThemeCatalog.defaultTheme()
+    private var isSyncingThemeSpinnerSelection = false
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var presetController: PresetController
@@ -296,8 +270,7 @@ class MainActivity : AppCompatActivity() {
             val updatedPreset = presetController.updatePresetVisual(targetIndex) { preset ->
                 preset.copy(
                     customEmoji = null,
-                    customImageFileName = storedFileName,
-                    appIconPackageName = null
+                    customImageFileName = storedFileName
                 )
             }
 
@@ -311,16 +284,16 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "${updatedPreset.name} image updated", Toast.LENGTH_SHORT).show()
         }
 
-    private val exportPresetsLauncher =
-        registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri: Uri? ->
+    private val exportThemeLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
             if (uri == null) return@registerForActivityResult
-            exportPresetBundle(uri)
+            exportCurrentTheme(uri)
         }
 
-    private val importPresetsLauncher =
+    private val importThemeLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
             if (uri == null) return@registerForActivityResult
-            importPresetBundle(uri)
+            importThemeFromUri(uri)
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -372,20 +345,14 @@ class MainActivity : AppCompatActivity() {
         animationSpinner = findViewById(R.id.animationSpinner)
         profileSpinner = findViewById(R.id.profileSpinner)
         presetSpinner = findViewById(R.id.presetSpinner)
+        themeSpinner = findViewById(R.id.themeSpinner)
         savePresetButton = findViewById(R.id.savePresetButton)
         modifyPresetButton = findViewById(R.id.modifyPresetButton)
         deletePresetButton = findViewById(R.id.deletePresetButton)
-        customizePresetArtworkButton = findViewById(R.id.customizePresetArtworkButton)
-        exportPresetsButton = findViewById(R.id.exportPresetsButton)
-        importPresetsButton = findViewById(R.id.importPresetsButton)
+        exportThemeButton = findViewById(R.id.exportPresetsButton)
+        importThemeButton = findViewById(R.id.importPresetsButton)
         colorButton = findViewById(R.id.colorButton)
         rightColorButton = findViewById(R.id.rightColorButton)
-        batteryLowColorButton = findViewById(R.id.batteryLowColorButton)
-        batteryMidColorButton = findViewById(R.id.batteryMidColorButton)
-        batteryHighColorButton = findViewById(R.id.batteryHighColorButton)
-        cpuCoolColorButton = findViewById(R.id.cpuCoolColorButton)
-        cpuWarmColorButton = findViewById(R.id.cpuWarmColorButton)
-        cpuHotColorButton = findViewById(R.id.cpuHotColorButton)
         brightnessSeekBar = findViewById(R.id.brightnessSeekBar)
         speedSeekBar = findViewById(R.id.speedSeekBar)
         smoothnessSeekBar = findViewById(R.id.smoothnessSeekBar)
@@ -398,13 +365,6 @@ class MainActivity : AppCompatActivity() {
         flashWhenReadySwitch = findViewById(R.id.flashWhenReadySwitch)
         appProfileSwitch = findViewById(R.id.appProfileSwitch)
         homeAppProfileSwitch = findViewById(R.id.homeAppProfileSwitch)
-        val appProfileDefaultSwitchId = resources.getIdentifier(
-            "appProfileDefaultSwitch",
-            "id",
-            packageName
-        )
-        check(appProfileDefaultSwitchId != 0) { "Missing appProfileDefaultSwitch id" }
-        appProfileDefaultSwitch = findViewById(appProfileDefaultSwitchId)
         assignAppButton = findViewById(R.id.assignAppButton)
         manageAppsButton = findViewById(R.id.manageAppsButton)
         modeCard = findViewById(R.id.modeCard)
@@ -426,8 +386,8 @@ class MainActivity : AppCompatActivity() {
             handleMediaProjectionRequirement()
         }
 
+        setupThemeFeature()
         setupHomeSurface()
-        setupBackNavigationHandler()
         setupAnimationSpinner()
         setupProfileSpinner()
         setupColorButton()
@@ -441,8 +401,7 @@ class MainActivity : AppCompatActivity() {
         setupBreatheWhenChargingSwitch()
         setupChargingSpeedIndicatorSwitch()
         setupFlashWhenReadySwitch()
-        titleAnimator = BifrostTitleAnimator(bifrostTitleText, bifrostLogoView)
-        titleAnimator?.setup()
+        setupRainbowTitleText()
         appProfileManager = AppProfileManager(prefs)
         setupAppProfileFeature()
         setupAutoStartupSwitch()
@@ -462,9 +421,6 @@ class MainActivity : AppCompatActivity() {
             enableRainbowBackground(isChecked)
 
             if (isChecked) {
-                if (!LEDService.isRunning) {
-                    playBifrostHeaderAnimation()
-                }
                 handleStartWithCurrentSelection()
             } else {
                 serviceController.stopDebounced()
@@ -476,93 +432,185 @@ class MainActivity : AppCompatActivity() {
         isAppInitialized = true
     }
 
-    private fun setupBackNavigationHandler() {
-        onBackPressedDispatcher.addCallback(
-            this,
-            object : OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() {
-                    if (::settingsOverlay.isInitialized && settingsOverlay.visibility == View.VISIBLE) {
-                        requestCloseSettingsOverlay()
-                        return
-                    }
-
-                    isEnabled = false
-                    onBackPressedDispatcher.onBackPressed()
-                    isEnabled = true
-                }
-            }
-        )
-    }
-
     private fun setupHomeSurface() {
         homeSettingsButton.setOnClickListener { openSettingsOverlay() }
-        closeSettingsButton.setOnClickListener { requestCloseSettingsOverlay() }
-        customizePresetArtworkButton.setOnClickListener {
-            openSelectedPresetArtworkEditor(it)
-        }
+        closeSettingsButton.setOnClickListener { closeSettingsOverlay() }
 
         presetCoverFlowScroll.setOnTouchListener { _, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    isCoverFlowTouching = true
-                    cancelPendingCoverFlowSnap()
-                }
+            if (::appProfileManager.isInitialized && appProfileManager.isEnabled) {
+                return@setOnTouchListener true
+            }
 
-                MotionEvent.ACTION_UP,
-                MotionEvent.ACTION_CANCEL -> {
-                    isCoverFlowTouching = false
-                    scheduleCoverFlowSnap()
+            if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                if (suppressNextCoverFlowSnap) {
+                    suppressNextCoverFlowSnap = false
+                    return@setOnTouchListener false
                 }
+                snapCoverFlowToNearestPreset()
             }
             false
         }
 
         presetCoverFlowScroll.setOnScrollChangeListener { _, _, _, _, _ ->
             updateCoverFlowCardTransforms()
-            if (!::appProfileManager.isInitialized || !appProfileManager.isEnabled) {
-                if (!isCoverFlowTouching) {
-                    scheduleCoverFlowSnap()
+        }
+    }
+
+    private fun setupThemeFeature() {
+        themeRepository = BifrostThemeRepository(prefs)
+        val selectedTheme = themeRepository.selectedTheme()
+        refreshThemeSpinnerSelection(selectedTheme.id)
+
+        themeSpinner.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(
+                    parent: AdapterView<*>?,
+                    view: View?,
+                    position: Int,
+                    id: Long
+                ) {
+                    if (isSyncingThemeSpinnerSelection) return
+                    val theme = availableThemes.getOrNull(position) ?: return
+                    applySelectedTheme(theme, persistSelection = true)
                 }
+
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            }
+
+        exportThemeButton.setOnClickListener {
+            val currentTheme = availableThemes.getOrNull(themeSpinner.selectedItemPosition) ?: selectedUiTheme
+            val normalizedName = currentTheme.name
+                .lowercase()
+                .replace(Regex("[^a-z0-9]+"), "_")
+                .trim('_')
+                .ifBlank { "theme" }
+            exportThemeLauncher.launch("bifrost_theme_${normalizedName}.json")
+        }
+
+        importThemeButton.setOnClickListener {
+            importThemeLauncher.launch(arrayOf("application/json", "*/*"))
+        }
+    }
+
+    private fun refreshThemeSpinnerSelection(targetThemeId: String) {
+        availableThemes = themeRepository.availableThemes()
+        val labels = availableThemes.map { theme ->
+            if (theme.builtIn) theme.name else "${theme.name} (Imported)"
+        }
+
+        val adapter = ArrayAdapter(this, R.layout.item_spinner_theme, labels)
+        adapter.setDropDownViewResource(R.layout.item_spinner_theme_dropdown)
+        themeSpinner.adapter = adapter
+
+        val fallbackIndex = availableThemes.indexOfFirst { it.id == BifrostThemeCatalog.defaultTheme().id }
+            .takeIf { it >= 0 } ?: 0
+        val selectedIndex = availableThemes.indexOfFirst { it.id == targetThemeId }
+            .takeIf { it >= 0 } ?: fallbackIndex
+
+        isSyncingThemeSpinnerSelection = true
+        themeSpinner.setSelection(selectedIndex, false)
+        isSyncingThemeSpinnerSelection = false
+
+        availableThemes.getOrNull(selectedIndex)?.let { theme ->
+            applySelectedTheme(theme, persistSelection = false)
+        }
+    }
+
+    private fun applySelectedTheme(theme: BifrostUiTheme, persistSelection: Boolean) {
+        selectedUiTheme = theme
+        if (persistSelection) {
+            themeRepository.setSelectedThemeId(theme.id)
+        }
+
+        applyUiTheme(theme)
+
+        if (::presetController.isInitialized) {
+            refreshCoverFlowFromPresets()
+            updateCoverFlowCardTransforms()
+        }
+
+        if (bifrostTitleLabel.isNotBlank()) {
+            resetBifrostHeaderAnimationState()
+        }
+    }
+
+    private fun applyUiTheme(theme: BifrostUiTheme) {
+        window.statusBarColor = theme.backgroundColor
+
+        findViewById<View>(android.R.id.content).setBackgroundColor(theme.backgroundColor)
+        homeContainer.setBackgroundColor(theme.backgroundColor)
+        settingsOverlay.setBackgroundColor(theme.backgroundColor)
+
+        applyThemeToViewTree(homeContainer, theme)
+        applyThemeToViewTree(settingsOverlay, theme)
+    }
+
+    private fun applyThemeToViewTree(view: View, theme: BifrostUiTheme) {
+        when (view) {
+            is MaterialCardView -> {
+                view.setCardBackgroundColor(theme.cardColor)
+                view.setStrokeColor(theme.accentColor)
+            }
+
+            is MaterialButton -> {
+                if (view.id != R.id.colorButton && view.id != R.id.rightColorButton) {
+                    view.backgroundTintList = ColorStateList.valueOf(theme.surfaceColor)
+                    view.strokeColor = ColorStateList.valueOf(theme.accentColor)
+                    view.setTextColor(theme.textColor)
+                    view.iconTint = ColorStateList.valueOf(theme.textColor)
+                }
+            }
+
+            is SwitchMaterial -> {
+                view.thumbTintList = ColorStateList.valueOf(theme.accentLightColor)
+                view.trackTintList = ColorStateList.valueOf(theme.surfaceColor)
+            }
+
+            is TextView -> {
+                val baselineSecondary = BifrostThemeCatalog.defaultTheme().textSecondaryColor
+                val isSecondaryText = view.currentTextColor == baselineSecondary
+                view.setTextColor(if (isSecondaryText) theme.textSecondaryColor else theme.textColor)
+            }
+
+            is Spinner -> {
+                view.background?.mutate()?.setTint(theme.surfaceColor)
+            }
+        }
+
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                applyThemeToViewTree(view.getChildAt(index), theme)
             }
         }
     }
 
-    private fun cancelPendingCoverFlowSnap() {
-        coverFlowSnapRunnable?.let(mainHandler::removeCallbacks)
-        coverFlowSnapRunnable = null
+    private fun exportCurrentTheme(uri: Uri) {
+        val theme = availableThemes.getOrNull(themeSpinner.selectedItemPosition) ?: selectedUiTheme
+        val exported = runCatching {
+            themeRepository.exportThemeToUri(this, theme, uri)
+        }.isSuccess
+
+        if (exported) {
+            Toast.makeText(this, "Exported theme: ${theme.name}", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Theme export failed", Toast.LENGTH_SHORT).show()
+        }
     }
 
-    private fun scheduleCoverFlowSnap() {
-        if (!::presetController.isInitialized) return
-        if (::appProfileManager.isInitialized && appProfileManager.isEnabled) return
+    private fun importThemeFromUri(uri: Uri) {
+        val imported = runCatching {
+            themeRepository.importThemeFromUri(this, uri)
+        }.getOrNull()
 
-        cancelPendingCoverFlowSnap()
-        lastCoverFlowScrollXForSnap = presetCoverFlowScroll.scrollX
-
-        coverFlowSnapRunnable = object : Runnable {
-            override fun run() {
-                if (isCoverFlowTouching) {
-                    cancelPendingCoverFlowSnap()
-                    return
-                }
-
-                val currentX = presetCoverFlowScroll.scrollX
-                if (currentX != lastCoverFlowScrollXForSnap) {
-                    lastCoverFlowScrollXForSnap = currentX
-                    mainHandler.postDelayed(this, COVER_FLOW_SNAP_SETTLE_DELAY_MS)
-                    return
-                }
-
-                if (suppressNextCoverFlowSnap) {
-                    suppressNextCoverFlowSnap = false
-                }
-
-                snapCoverFlowToNearestPreset()
-                cancelPendingCoverFlowSnap()
-            }
+        if (imported == null) {
+            Toast.makeText(this, "Theme import failed", Toast.LENGTH_SHORT).show()
+            return
         }
 
-        mainHandler.postDelayed(coverFlowSnapRunnable!!, COVER_FLOW_SNAP_SETTLE_DELAY_MS)
+        val savedTheme = themeRepository.saveImportedTheme(imported)
+        themeRepository.setSelectedThemeId(savedTheme.id)
+        refreshThemeSpinnerSelection(savedTheme.id)
+        Toast.makeText(this, "Imported theme: ${savedTheme.name}", Toast.LENGTH_SHORT).show()
     }
 
     private fun openSettingsOverlay() {
@@ -624,48 +672,6 @@ class MainActivity : AppCompatActivity() {
             .start()
     }
 
-    private fun promptCloseSettingsWithSaveChoice() {
-        val dialog = BifrostAlertDialog()
-        dialog.show(
-            activity = this,
-            title = getString(R.string.settings_close_confirm_title),
-            subtitle = getString(R.string.settings_close_confirm_subtitle),
-            body = null,
-            positiveLabelResId = R.string.action_save,
-            negativeLabelResId = R.string.action_dont_save,
-            cancelable = true,
-            onConfirm = {
-                presetController.saveCurrentConfigToSelectedPreset()
-                closeSettingsOverlay()
-            },
-            onCancel = {
-                closeSettingsOverlay()
-            }
-        )
-    }
-
-    private fun requestCloseSettingsOverlay() {
-        if (!::presetController.isInitialized || !presetController.hasUnsavedChangesForSelectedPreset()) {
-            closeSettingsOverlay()
-            return
-        }
-        promptCloseSettingsWithSaveChoice()
-    }
-
-    private fun openSelectedPresetArtworkEditor(anchor: View) {
-        if (!::presetController.isInitialized) return
-        val presets = presetController.getPresets()
-        if (presets.isEmpty()) return
-
-        val selectedIndex = presetSpinner.selectedItemPosition
-        if (selectedIndex !in presets.indices) {
-            Toast.makeText(this, "Select a preset first", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        showPresetArtworkMenu(anchor, selectedIndex)
-    }
-
     private fun startAppProfileSync() {
         if (!::presetController.isInitialized) return
         stopAppProfileSync()
@@ -680,14 +686,8 @@ class MainActivity : AppCompatActivity() {
                 if (!lastPresetName.isNullOrBlank()) {
                     val presets = presetController.getPresets()
                     val index = presets.indexOfFirst { it.name == lastPresetName }
-                    if (index in presets.indices) {
-                        selectedCoverFlowIndex = index
-                        val selectedPreset = presets[index]
-                        activePresetNameText.text = selectedPreset.name
-                        activePresetAnimationText.text =
-                            formatCardAnimationLabel(selectedPreset.animationType.name)
-                        activePresetProfileText.text =
-                            formatCardProfileLabel(selectedPreset.performanceProfile.name)
+                    if (index in presets.indices && index != selectedCoverFlowIndex) {
+                        selectPresetFromCoverFlow(index, animate = true, applyPreset = false)
                     }
                 }
 
@@ -716,41 +716,15 @@ class MainActivity : AppCompatActivity() {
         val tileGapPx = dpToPx(COVER_FLOW_TILE_GAP_DP)
         if (presets.isEmpty()) {
             presetCoverFlowContainer.removeAllViews()
-            presetCoverFlowContainer.addView(createCreatePresetActionCard(tileSizePx, tileGapPx))
             activePresetNameText.text = "No presets"
             activePresetAnimationText.text = "Animation: -"
             activePresetProfileText.text = "Profile: -"
             selectedCoverFlowIndex = 0
-
-            presetCoverFlowScroll.post {
-                val sidePadding = ((presetCoverFlowScroll.width - tileSizePx) / 2).coerceAtLeast(dpToPx(12))
-                presetCoverFlowContainer.setPadding(sidePadding, 0, sidePadding, 0)
-                centerPresetCard(0, animate = false)
-                updateCoverFlowCardTransforms()
-            }
-
-            updateManualPresetSwitchingUi(appProfileManager.isEnabled)
             return
         }
 
         presetCoverFlowContainer.removeAllViews()
         presets.forEachIndexed { index, preset ->
-            var longPressTriggered = false
-            var longPressRunnable: Runnable? = null
-            var movedTooMuchForTap = false
-            val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
-            var downX = 0f
-            var downY = 0f
-
-            val triggerCardLongPress: () -> Unit = {
-                if (!isCoverFlowDragging) {
-                    suppressNextCoverFlowSnap = true
-                    selectPresetFromCoverFlow(index, animate = true, applyPreset = false)
-                    presetController.selectPresetForEditing(index)
-                    openSettingsOverlay()
-                }
-            }
-
             val card = MaterialCardView(this).apply {
                 tag = index
                 val layoutParams = LinearLayout.LayoutParams(tileSizePx, tileSizePx).apply {
@@ -759,8 +733,8 @@ class MainActivity : AppCompatActivity() {
                 this.layoutParams = layoutParams
                 radius = dpToPx(16).toFloat()
                 cardElevation = 0f
-                setCardBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.bifrost_card))
-                setStrokeColor(ContextCompat.getColor(this@MainActivity, R.color.bifrost_accent))
+                setCardBackgroundColor(selectedUiTheme.cardColor)
+                setStrokeColor(selectedUiTheme.accentColor)
                 strokeWidth = dpToPx(1)
                 setOnClickListener {
                     if (autoSwitchEnabled) return@setOnClickListener
@@ -769,62 +743,10 @@ class MainActivity : AppCompatActivity() {
                     selectPresetFromCoverFlow(index, animate = true)
                 }
                 setOnLongClickListener {
-                    triggerCardLongPress()
-                    true
-                }
-                setOnTouchListener { view, event ->
-                    when (event.actionMasked) {
-                        MotionEvent.ACTION_DOWN -> {
-                            longPressTriggered = false
-                            movedTooMuchForTap = false
-                            downX = event.x
-                            downY = event.y
-                            parent?.requestDisallowInterceptTouchEvent(true)
-                            longPressRunnable?.let(mainHandler::removeCallbacks)
-                            longPressRunnable = Runnable {
-                                if (!longPressTriggered) {
-                                    triggerCardLongPress()
-                                    longPressTriggered = true
-                                }
-                            }
-                            mainHandler.postDelayed(
-                                longPressRunnable!!,
-                                ViewConfiguration.getLongPressTimeout().toLong()
-                            )
-                        }
-
-                        MotionEvent.ACTION_MOVE -> {
-                            val movedTooMuch = abs(event.x - downX) > touchSlop || abs(event.y - downY) > touchSlop
-                            if (movedTooMuch) {
-                                movedTooMuchForTap = true
-                                parent?.requestDisallowInterceptTouchEvent(false)
-                                longPressRunnable?.let(mainHandler::removeCallbacks)
-                                longPressRunnable = null
-                            }
-                        }
-
-                        MotionEvent.ACTION_UP,
-                        MotionEvent.ACTION_CANCEL -> {
-                            parent?.requestDisallowInterceptTouchEvent(false)
-                            longPressRunnable?.let(mainHandler::removeCallbacks)
-                            longPressRunnable = null
-                            if (event.actionMasked == MotionEvent.ACTION_UP && longPressTriggered) {
-                                // Consume ACTION_UP after long press to avoid triggering the tap handler.
-                                return@setOnTouchListener true
-                            }
-
-                            if (
-                                event.actionMasked == MotionEvent.ACTION_UP &&
-                                !movedTooMuchForTap &&
-                                !autoSwitchEnabled &&
-                                !isCoverFlowDragging
-                            ) {
-                                view.performClick()
-                                return@setOnTouchListener true
-                            }
-                        }
-                    }
-                    false
+                    if (autoSwitchEnabled) return@setOnLongClickListener true
+                    if (isCoverFlowDragging) return@setOnLongClickListener true
+                    suppressNextCoverFlowSnap = true
+                    showPresetArtworkMenu(it, index)
                 }
                 setOnDragListener { dragTarget, event ->
                     if (autoSwitchEnabled) return@setOnDragListener true
@@ -875,14 +797,6 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dpToPx(14), dpToPx(10), dpToPx(14), dpToPx(10))
                 background = ContextCompat.getDrawable(this@MainActivity, R.drawable.card_glow_bg)
-                isClickable = true
-                isLongClickable = true
-                setOnClickListener {
-                    card.performClick()
-                }
-                setOnLongClickListener {
-                    card.performLongClick()
-                }
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
@@ -897,10 +811,30 @@ class MainActivity : AppCompatActivity() {
                 )
                 gravity = android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL
                 textAlignment = View.TEXT_ALIGNMENT_CENTER
-                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.bifrost_text))
+                setTextColor(selectedUiTheme.textColor)
                 textSize = 16f
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
                 maxLines = 1
+            }
+
+            val dragHandle = TextView(this).apply {
+                text = "\u2261"
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    gravity = android.view.Gravity.END
+                }
+                setTextColor(selectedUiTheme.textSecondaryColor)
+                textSize = 18f
+                contentDescription = "Drag to reorder"
+                setOnLongClickListener {
+                    if (autoSwitchEnabled) return@setOnLongClickListener true
+                    suppressNextCoverFlowSnap = true
+                    val dragData = ClipData.newPlainText("preset-index", index.toString())
+                    it.startDragAndDrop(dragData, View.DragShadowBuilder(card), index, 0)
+                    true
+                }
             }
 
             val centerIconContainer = LinearLayout(this).apply {
@@ -934,13 +868,11 @@ class MainActivity : AppCompatActivity() {
             centerIconContainer.addView(emojiView)
             centerIconContainer.addView(drawableIconView)
             content.addView(name)
+            content.addView(dragHandle)
             content.addView(centerIconContainer)
             card.addView(content)
             presetCoverFlowContainer.addView(card)
         }
-
-        // Keep a persistent trailing action tile to create a new preset from the home flow.
-        presetCoverFlowContainer.addView(createCreatePresetActionCard(tileSizePx, tileGapPx))
 
         selectedCoverFlowIndex = if (::appProfileManager.isInitialized && appProfileManager.isEnabled) {
             val lastPresetName = prefs.getString(PREF_KEY_LAST_PRESET, null)
@@ -963,91 +895,7 @@ class MainActivity : AppCompatActivity() {
             updateCoverFlowCardTransforms()
         }
 
-        syncAppProfileDefaultSwitch()
-
         updateManualPresetSwitchingUi(appProfileManager.isEnabled)
-    }
-
-    private fun createCreatePresetActionCard(tileSizePx: Int, tileGapPx: Int): MaterialCardView {
-        val card = MaterialCardView(this).apply {
-            tag = COVER_FLOW_CREATE_TAG
-            layoutParams = LinearLayout.LayoutParams(tileSizePx, tileSizePx).apply {
-                marginEnd = tileGapPx
-            }
-            radius = dpToPx(16).toFloat()
-            cardElevation = 0f
-            setCardBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.bifrost_card))
-            setStrokeColor(ContextCompat.getColor(this@MainActivity, R.color.bifrost_accent))
-            strokeWidth = dpToPx(1)
-            setOnClickListener {
-                if (::appProfileManager.isInitialized && appProfileManager.isEnabled) return@setOnClickListener
-                launchCreatePresetFromCoverFlow()
-            }
-        }
-
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = android.view.Gravity.CENTER
-            background = ContextCompat.getDrawable(this@MainActivity, R.drawable.card_glow_bg)
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-            setPadding(dpToPx(12), dpToPx(12), dpToPx(12), dpToPx(12))
-        }
-
-        val plusBubble = TextView(this).apply {
-            text = "+"
-            gravity = android.view.Gravity.CENTER
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.bifrost_text))
-            textSize = 34f
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(ContextCompat.getColor(this@MainActivity, R.color.bifrost_surface))
-                setStroke(dpToPx(2), ContextCompat.getColor(this@MainActivity, R.color.bifrost_accent))
-            }
-            layoutParams = LinearLayout.LayoutParams(dpToPx(88), dpToPx(88))
-            contentDescription = "Create new preset"
-        }
-
-        val label = TextView(this).apply {
-            text = "NEW PRESET"
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.bifrost_text_secondary))
-            textSize = 11f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            letterSpacing = 0.06f
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = dpToPx(12)
-            }
-        }
-
-        content.addView(plusBubble)
-        content.addView(label)
-        card.addView(content)
-        return card
-    }
-
-    private fun launchCreatePresetFromCoverFlow() {
-        if (!::presetController.isInitialized) return
-
-        if (settingsOverlay.visibility != View.VISIBLE) {
-            openSettingsOverlay()
-        }
-
-        val triggerCreatePreset: () -> Unit = {
-            if (settingsOverlay.visibility == View.VISIBLE) {
-                presetController.showSaveAsNewPresetDialogFromHomePlus()
-            }
-        }
-
-        if (isSettingsOverlayAnimating) {
-            mainHandler.postDelayed(triggerCreatePreset, SETTINGS_OPEN_DURATION_MS + 40L)
-        } else {
-            mainHandler.post(triggerCreatePreset)
-        }
     }
 
     private fun selectPresetFromCoverFlow(index: Int, animate: Boolean, applyPreset: Boolean = true) {
@@ -1074,8 +922,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun snapCoverFlowToNearestPreset() {
         if (presetCoverFlowContainer.childCount == 0) return
-        val presetCount = presetController.getPresets().size
-        if (presetCount <= 0) return
 
         val centerX = presetCoverFlowScroll.scrollX + (presetCoverFlowScroll.width / 2f)
         var nearestIndex = 0
@@ -1083,7 +929,6 @@ class MainActivity : AppCompatActivity() {
 
         for (index in 0 until presetCoverFlowContainer.childCount) {
             val card = presetCoverFlowContainer.getChildAt(index) ?: continue
-            if (!isPresetCardIndex(index, presetCount)) continue
             val cardCenterX = card.left + (card.width / 2f)
             val distance = abs(centerX - cardCenterX)
             if (distance < nearestDistance) {
@@ -1092,8 +937,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val shouldApplyPreset = nearestIndex != selectedCoverFlowIndex
-        selectPresetFromCoverFlow(nearestIndex, animate = true, applyPreset = shouldApplyPreset)
+        selectPresetFromCoverFlow(nearestIndex, animate = true)
     }
 
     private fun centerPresetCard(index: Int, animate: Boolean) {
@@ -1112,55 +956,30 @@ class MainActivity : AppCompatActivity() {
     private fun updateCoverFlowCardTransforms() {
         val scrollWidth = presetCoverFlowScroll.width
         val centerX = presetCoverFlowScroll.scrollX + (presetCoverFlowScroll.width / 2f)
-        val accentColor = ContextCompat.getColor(this, R.color.bifrost_accent)
-        val secondaryColor = ContextCompat.getColor(this, R.color.bifrost_text_secondary)
+        val accentColor = selectedUiTheme.accentColor
+        val secondaryColor = selectedUiTheme.textSecondaryColor
         val autoSwitchEnabled = ::appProfileManager.isInitialized && appProfileManager.isEnabled
 
         if (scrollWidth <= 0) {
             for (index in 0 until presetCoverFlowContainer.childCount) {
                 val card = presetCoverFlowContainer.getChildAt(index) as? MaterialCardView ?: continue
-                if (isCreatePresetCard(card)) {
-                    card.scaleX = 1f
-                    card.scaleY = 1f
-                    card.alpha = if (autoSwitchEnabled) 0.5f else 0.88f
-                    card.strokeWidth = dpToPx(1)
-                    card.setStrokeColor(accentColor)
-                    continue
-                }
                 val isSelected = index == selectedCoverFlowIndex
                 card.scaleX = 1f
                 card.scaleY = 1f
                 card.alpha = if (autoSwitchEnabled) {
-                    0.3f
+                    if (isSelected) 0.72f else 0.26f
                 } else {
                     if (isSelected) 1f else 0.5f
                 }
 
-                if (autoSwitchEnabled) {
-                    card.strokeWidth = dpToPx(1)
-                    card.setStrokeColor(secondaryColor)
-                } else {
-                    card.strokeWidth = if (isSelected) dpToPx(2) else dpToPx(1)
-                    card.setStrokeColor(if (isSelected) accentColor else secondaryColor)
-                }
+                card.strokeWidth = if (isSelected) dpToPx(2) else dpToPx(1)
+                card.setStrokeColor(if (isSelected) accentColor else secondaryColor)
             }
             return
         }
 
         for (index in 0 until presetCoverFlowContainer.childCount) {
             val card = presetCoverFlowContainer.getChildAt(index) as? MaterialCardView ?: continue
-            if (isCreatePresetCard(card)) {
-                val cardCenterX = card.left + (card.width / 2f)
-                val distance = abs(centerX - cardCenterX)
-                val normalizedDistance = (distance / (scrollWidth * 0.9f)).coerceIn(0f, 1f)
-                val scale = 1f - (0.12f * normalizedDistance)
-                card.scaleX = scale
-                card.scaleY = scale
-                card.alpha = if (autoSwitchEnabled) 0.46f else 0.78f + (0.2f * (1f - normalizedDistance))
-                card.strokeWidth = dpToPx(1)
-                card.setStrokeColor(accentColor)
-                continue
-            }
             val cardCenterX = card.left + (card.width / 2f)
             val distance = abs(centerX - cardCenterX)
             val normalizedDistance = (distance / (scrollWidth * 0.9f)).coerceIn(0f, 1f)
@@ -1170,27 +989,18 @@ class MainActivity : AppCompatActivity() {
             card.scaleX = scale
             card.scaleY = scale
             card.alpha = if (autoSwitchEnabled) {
-                0.22f + (0.12f * (1f - normalizedDistance))
+                if (isSelected) {
+                    0.76f
+                } else {
+                    0.22f + (0.12f * (1f - normalizedDistance))
+                }
             } else {
                 0.5f + (0.5f * (1f - normalizedDistance))
             }
 
-            if (autoSwitchEnabled) {
-                card.strokeWidth = dpToPx(1)
-                card.setStrokeColor(secondaryColor)
-            } else {
-                card.strokeWidth = if (isSelected) dpToPx(2) else dpToPx(1)
-                card.setStrokeColor(if (isSelected) accentColor else secondaryColor)
-            }
+            card.strokeWidth = if (isSelected) dpToPx(2) else dpToPx(1)
+            card.setStrokeColor(if (isSelected) accentColor else secondaryColor)
         }
-    }
-
-    private fun isPresetCardIndex(index: Int, presetCount: Int): Boolean {
-        return index in 0 until presetCount
-    }
-
-    private fun isCreatePresetCard(view: View): Boolean {
-        return (view.tag as? Int) == COVER_FLOW_CREATE_TAG
     }
 
     private fun syncAppProfileSwitches(isChecked: Boolean) {
@@ -1200,25 +1010,9 @@ class MainActivity : AppCompatActivity() {
         isSyncingAppProfileSwitches = false
     }
 
-    private fun syncAppProfileDefaultSwitch() {
-        if (!::presetController.isInitialized) return
-        val selectedIndex = presetSpinner.selectedItemPosition
-        val preset = presetController.getPresets().getOrNull(selectedIndex)
-        isSyncingAppProfileDefaultSwitch = true
-        appProfileDefaultSwitch.isChecked = preset?.isAppProfileDefault == true
-        isSyncingAppProfileDefaultSwitch = false
-    }
-
-    private fun requestImmediateAppProfileResolution() {
-        if (!LEDService.isRunning) return
-        startService(Intent(this, LEDService::class.java).apply {
-            action = LEDService.ACTION_FORCE_APP_PROFILE_RESOLUTION
-        })
-    }
-
     private fun updateManualPresetSwitchingUi(autoSwitchEnabled: Boolean) {
-        presetCoverFlowScroll.isEnabled = true
-        presetCoverFlowScroll.scrollLocked = false
+        presetCoverFlowScroll.isEnabled = !autoSwitchEnabled
+        presetCoverFlowScroll.scrollLocked = autoSwitchEnabled
         activePresetInfoCard.alpha = 1f
         activePresetStatusBadge.visibility = if (autoSwitchEnabled) View.VISIBLE else View.GONE
         presetCoverFlowScroll.alpha = if (autoSwitchEnabled) 0.95f else 1f
@@ -1278,11 +1072,7 @@ class MainActivity : AppCompatActivity() {
 
         fun renderSheet(preset: LedPreset) {
             previewNameView.text = preset.name
-            resetButton.visibility = if (
-                !preset.customEmoji.isNullOrBlank() ||
-                !preset.customImageFileName.isNullOrBlank() ||
-                !preset.appIconPackageName.isNullOrBlank()
-            ) {
+            resetButton.visibility = if (!preset.customEmoji.isNullOrBlank() || !preset.customImageFileName.isNullOrBlank()) {
                 View.VISIBLE
             } else {
                 View.GONE
@@ -1300,7 +1090,6 @@ class MainActivity : AppCompatActivity() {
             builtInIcons.forEach { icon ->
                 val isSelected = preset.customEmoji.isNullOrBlank() &&
                     preset.customImageFileName.isNullOrBlank() &&
-                    preset.appIconPackageName.isNullOrBlank() &&
                     preset.icon == icon
                 iconOptionsContainer.addView(
                     createPresetArtworkIconOption(
@@ -1315,40 +1104,7 @@ class MainActivity : AppCompatActivity() {
                                 current.copy(
                                     icon = icon,
                                     customEmoji = null,
-                                    customImageFileName = null,
-                                    appIconPackageName = null
-                                )
-                            }
-                            if (updatedPreset != null) {
-                                renderSheet(updatedPreset)
-                            }
-                        }
-                    )
-                )
-            }
-
-            val assignedApps = resolveAssignedAppVisuals(preset.name)
-            assignedApps.forEach { appVisual ->
-                val isSelected =
-                    preset.customEmoji.isNullOrBlank() &&
-                    preset.customImageFileName.isNullOrBlank() &&
-                    preset.appIconPackageName == appVisual.packageName
-
-                iconOptionsContainer.addView(
-                    createPresetArtworkAppIconOption(
-                        iconDrawable = appVisual.icon,
-                        label = appVisual.appName,
-                        isSelected = isSelected,
-                        onClick = {
-                            emojiInputLayout.error = null
-                            emojiInput.setText("")
-                            val updatedPreset = updatePresetVisualInSheet(
-                                successMessage = { "${it.name} app icon updated" }
-                            ) { current ->
-                                current.copy(
-                                    customEmoji = null,
-                                    customImageFileName = null,
-                                    appIconPackageName = appVisual.packageName
+                                    customImageFileName = null
                                 )
                             }
                             if (updatedPreset != null) {
@@ -1373,8 +1129,7 @@ class MainActivity : AppCompatActivity() {
             ) { current ->
                 current.copy(
                     customEmoji = value,
-                    customImageFileName = null,
-                    appIconPackageName = null
+                    customImageFileName = null
                 )
             }
             if (updatedPreset != null) {
@@ -1395,8 +1150,7 @@ class MainActivity : AppCompatActivity() {
             ) { current ->
                 current.copy(
                     customEmoji = null,
-                    customImageFileName = null,
-                    appIconPackageName = null
+                    customImageFileName = null
                 )
             }
             if (updatedPreset != null) {
@@ -1416,13 +1170,6 @@ class MainActivity : AppCompatActivity() {
 
         renderSheet(initialPreset)
         dialog.show()
-
-        val behavior = dialog.behavior
-        behavior.isFitToContents = true
-        behavior.skipCollapsed = false
-        behavior.peekHeight = dpToPx(300)
-        behavior.state = BottomSheetBehavior.STATE_COLLAPSED
-
         return true
     }
 
@@ -1444,13 +1191,8 @@ class MainActivity : AppCompatActivity() {
             }
             radius = dpToPx(14).toFloat()
             cardElevation = 0f
-            setCardBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.bifrost_surface))
-            setStrokeColor(
-                ContextCompat.getColor(
-                    this@MainActivity,
-                    if (isSelected) R.color.bifrost_accent else R.color.bifrost_text_secondary
-                )
-            )
+            setCardBackgroundColor(selectedUiTheme.surfaceColor)
+            setStrokeColor(if (isSelected) selectedUiTheme.accentColor else selectedUiTheme.textSecondaryColor)
             strokeWidth = dpToPx(if (isSelected) 2 else 1)
             isClickable = true
             isFocusable = true
@@ -1497,49 +1239,6 @@ class MainActivity : AppCompatActivity() {
         return card
     }
 
-    private fun createPresetArtworkAppIconOption(
-        iconDrawable: android.graphics.drawable.Drawable,
-        label: String,
-        isSelected: Boolean,
-        onClick: () -> Unit
-    ): View {
-        val card = MaterialCardView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(dpToPx(64), dpToPx(64)).apply {
-                marginEnd = dpToPx(10)
-            }
-            radius = dpToPx(14).toFloat()
-            cardElevation = 0f
-            setCardBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.bifrost_surface))
-            setStrokeColor(
-                ContextCompat.getColor(
-                    this@MainActivity,
-                    if (isSelected) R.color.bifrost_accent else R.color.bifrost_text_secondary
-                )
-            )
-            strokeWidth = dpToPx(if (isSelected) 2 else 1)
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { onClick() }
-            contentDescription = label
-        }
-
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = android.view.Gravity.CENTER_HORIZONTAL
-            setPadding(dpToPx(10), dpToPx(10), dpToPx(10), dpToPx(10))
-        }
-
-        val iconView = ImageView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(dpToPx(42), dpToPx(42))
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            setImageDrawable(iconDrawable)
-        }
-
-        content.addView(iconView)
-        card.addView(content)
-        return card
-    }
-
     private fun handleAppProfileToggleChange(isChecked: Boolean) {
         if (isSyncingAppProfileSwitches) return
 
@@ -1555,15 +1254,6 @@ class MainActivity : AppCompatActivity() {
         appProfileManager.resetLastForegroundPackage()
         syncAppProfileSwitches(isChecked)
         updateManualPresetSwitchingUi(isChecked)
-        maybeShowAppProfileInfoDialog(isChecked)
-
-        if (!LEDService.isRunning || serviceController.isServiceTransitioning) return
-
-        if (isChecked) {
-            requestImmediateAppProfileResolution()
-        } else {
-            startService(createLedServiceIntent())
-        }
     }
 
     private fun formatCardAnimationLabel(animationName: String): String {
@@ -1592,7 +1282,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupStatusBar() {
-        window.statusBarColor = getColor(R.color.bifrost_bg)
+        window.statusBarColor = selectedUiTheme.backgroundColor
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             WindowCompat.getInsetsController(window, window.decorView).apply {
                 isAppearanceLightStatusBars = false
@@ -1619,11 +1309,21 @@ class MainActivity : AppCompatActivity() {
         mainHandler.postDelayed(resumeStateSyncRunnable!!, 100)
     }
 
+    override fun onBackPressed() {
+        if (::settingsOverlay.isInitialized && settingsOverlay.visibility == View.VISIBLE) {
+            closeSettingsOverlay()
+            return
+        }
+        super.onBackPressed()
+    }
 
     override fun onPause() {
         super.onPause()
         if (!isAppInitialized) return
-        titleAnimator?.teardown()
+        titleIntroAnimator?.cancel()
+        headerSettleAnimator?.cancel()
+        titleIntroAnimator = null
+        headerSettleAnimator = null
         homeContainer.animate().cancel()
         homeContainer.alpha = if (settingsOverlay.visibility == View.VISIBLE) SETTINGS_HOME_DIM_ALPHA else 1f
         settingsOverlay.animate().cancel()
@@ -1640,8 +1340,10 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         if (!isAppInitialized) return
-        titleAnimator?.teardown()
-        titleAnimator = null
+        titleIntroAnimator?.cancel()
+        headerSettleAnimator?.cancel()
+        titleIntroAnimator = null
+        headerSettleAnimator = null
         homeContainer.animate().cancel()
         homeContainer.alpha = 1f
         settingsOverlay.animate().cancel()
@@ -1657,8 +1359,256 @@ class MainActivity : AppCompatActivity() {
         rainbowDrawable = null
     }
 
+    private fun setupRainbowTitleText() {
+        bifrostTitleLabel = bifrostTitleText.text.toString()
+        if (bifrostTitleLabel.isBlank()) return
+
+        bifrostLogoView.setOnClickListener { playBifrostHeaderAnimation() }
+        bifrostTitleText.setOnClickListener { playBifrostHeaderAnimation() }
+        resetBifrostHeaderAnimationState()
+        playBifrostHeaderAnimation()
+    }
+
+    private inline fun runBifrostHeaderThemeProcess(themeStep: () -> Unit) {
+        resetBifrostHeaderToWhiteBaseline()
+        themeStep()
+    }
+
+    private fun currentHeaderThemePalette(): HeaderThemePalette {
+        return selectedUiTheme.headerPalette
+    }
+
+    private fun normalizedCyclePhase(phaseDegrees: Float): Float {
+        return ((phaseDegrees % 360f) + 360f) % 360f / 360f
+    }
+
+    private fun computeIntroThemeColor(index: Int, maxIndex: Int, phaseDegrees: Float): Int {
+        val palette = currentHeaderThemePalette()
+        val phase = normalizedCyclePhase(phaseDegrees)
+        val letterProgress = index / maxIndex.toFloat()
+        val hueWindow = palette.introHueSpan * ((phase + letterProgress) % 1f)
+        val hue = (palette.introHueStart + hueWindow) % 360f
+        return Color.HSVToColor(floatArrayOf(hue, palette.introSaturation, palette.introValue))
+    }
+
+    private fun computeSettleThemeColor(index: Int, maxIndex: Int, phaseDegrees: Float): Int {
+        val palette = currentHeaderThemePalette()
+        val phase = normalizedCyclePhase(phaseDegrees)
+        val letterProgress = index / maxIndex.toFloat()
+        val hueProgress = (letterProgress + phase) % 1f
+        val hue = (
+            palette.settleHueStart +
+                palette.settleHueSpan * hueProgress +
+                palette.settleHueWobbleAmplitude * sin(letterProgress * PI).toFloat()
+            ) % 360f
+        val saturation = (
+            palette.settleSaturationBase +
+                palette.settleSaturationWave * ((sin(letterProgress * PI * 3.0) + 1.0) / 2.0).toFloat()
+            ).coerceIn(0f, 1f)
+        val value = (
+            palette.settleValueBase +
+                palette.settleValueWave * ((cos(letterProgress * PI * 2.0) + 1.0) / 2.0).toFloat()
+            ).coerceIn(0f, 1f)
+        val alpha = (
+            palette.settleAlphaBase +
+                palette.settleAlphaWave * ((sin(letterProgress * PI * 2.5) + 1.0) / 2.0)
+            ).roundToInt().coerceIn(0, 255)
+        return Color.HSVToColor(alpha, floatArrayOf(hue, saturation, value))
+    }
+
+    private fun resetBifrostHeaderToWhiteBaseline() {
+        if (bifrostTitleLabel.isBlank()) return
+
+        bifrostTitleText.text = bifrostTitleLabel
+        bifrostTitleText.setTextColor(Color.WHITE)
+        bifrostLogoView.colorFilter = null
+    }
+
+    private fun applyRainbowTitlePhase(text: String, phaseDegrees: Float) {
+        val rainbowText = SpannableString(text)
+        val maxIndex = (text.length - 1).coerceAtLeast(1)
+
+        text.indices.forEach { index ->
+            if (text[index].isWhitespace()) return@forEach
+
+            val color = computeIntroThemeColor(index, maxIndex, phaseDegrees)
+            rainbowText.setSpan(
+                ForegroundColorSpan(color),
+                index,
+                index + 1,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+
+        bifrostTitleText.text = rainbowText
+    }
+
+    private fun applyWatercolorTitlePhase(text: String, phaseDegrees: Float) {
+        val watercolorText = SpannableString(text)
+        val maxIndex = (text.length - 1).coerceAtLeast(1)
+
+        text.indices.forEach { index ->
+            if (text[index].isWhitespace()) return@forEach
+
+            val color = computeSettleThemeColor(index, maxIndex, phaseDegrees)
+
+            watercolorText.setSpan(
+                ForegroundColorSpan(color),
+                index,
+                index + 1,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+
+        bifrostTitleText.text = watercolorText
+    }
+
     private fun playBifrostHeaderAnimation() {
-        titleAnimator?.play()
+        if (bifrostTitleLabel.isBlank()) return
+
+        titleIntroAnimator?.cancel()
+        headerSettleAnimator?.cancel()
+
+        runBifrostHeaderThemeProcess {
+            titleIntroAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = TITLE_INTRO_ANIMATION_MS
+                interpolator = LinearInterpolator()
+                addUpdateListener { animator ->
+                    val progress = animator.animatedValue as Float
+                    val phaseDegrees = progress * 720f
+                    applyRainbowTitlePhase(bifrostTitleLabel, phaseDegrees)
+                    applyBifrostLogoAnimationFrame(progress, phaseDegrees)
+                }
+                addListener(object : AnimatorListenerAdapter() {
+                    private var wasCanceled = false
+
+                    override fun onAnimationCancel(animation: Animator) {
+                        wasCanceled = true
+                        settleHeaderToStillState()
+                    }
+
+                    override fun onAnimationEnd(animation: Animator) {
+                        titleIntroAnimator = null
+                        if (!wasCanceled) {
+                            settleHeaderToStillState()
+                        }
+                    }
+                })
+                start()
+            }
+        }
+    }
+
+    private fun applyBifrostLogoAnimationFrame(progress: Float, phaseDegrees: Float) {
+        val spinWave = sin(progress * PI * 10.0).toFloat()
+        val pulseWave = ((1.0 - cos(progress * PI * 6.0)) / 2.0).toFloat()
+        val driftWave = sin(progress * PI * 4.0).toFloat()
+
+        bifrostLogoView.rotation = 16f * spinWave
+        bifrostLogoView.scaleX = 1f + (0.12f * pulseWave)
+        bifrostLogoView.scaleY = 1f + (0.12f * pulseWave)
+        bifrostLogoView.translationY = -10f * driftWave
+        bifrostLogoView.alpha = 0.9f + (0.1f * pulseWave)
+    }
+
+    private fun resetBifrostHeaderAnimationState() {
+        if (bifrostTitleLabel.isBlank()) return
+
+        runBifrostHeaderThemeProcess {
+            val settlePhaseDegrees = currentHeaderThemePalette().settlePhaseDegrees
+            applyWatercolorTitlePhase(bifrostTitleLabel, settlePhaseDegrees)
+            bifrostLogoView.rotation = 0f
+            bifrostLogoView.scaleX = 1f
+            bifrostLogoView.scaleY = 1f
+            bifrostLogoView.translationY = 0f
+            bifrostLogoView.alpha = 1f
+        }
+    }
+
+    private fun settleHeaderToStillState() {
+        if (bifrostTitleLabel.isBlank()) return
+
+        headerSettleAnimator?.cancel()
+
+        runBifrostHeaderThemeProcess {
+            bifrostLogoView.animate()
+                .rotation(0f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .translationY(0f)
+                .alpha(1f)
+                .setDuration(400L)
+                .setInterpolator(DecelerateInterpolator())
+                .withEndAction { bifrostLogoView.colorFilter = null }
+                .start()
+
+            val rainbowColors = getRainbowColors(bifrostTitleLabel, 720f)
+            val settlePhaseDegrees = currentHeaderThemePalette().settlePhaseDegrees
+            val watercolorColors = getWatercolorColors(bifrostTitleLabel, settlePhaseDegrees)
+
+            headerSettleAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 400L
+                interpolator = DecelerateInterpolator()
+                addUpdateListener { animator ->
+                    val t = animator.animatedValue as Float
+                    applyBlendedTitleColors(rainbowColors, watercolorColors, t)
+                }
+                addListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        applyWatercolorTitlePhase(bifrostTitleLabel, settlePhaseDegrees)
+                    }
+                })
+                start()
+            }
+        }
+    }
+
+    private fun getRainbowColors(text: String, phaseDegrees: Float): IntArray {
+        val colors = IntArray(text.length)
+        val maxIndex = (text.length - 1).coerceAtLeast(1)
+        text.indices.forEach { index ->
+            if (text[index].isWhitespace()) {
+                colors[index] = Color.TRANSPARENT
+            } else {
+                colors[index] = computeIntroThemeColor(index, maxIndex, phaseDegrees)
+            }
+        }
+        return colors
+    }
+
+    private fun getWatercolorColors(text: String, phaseDegrees: Float): IntArray {
+        val colors = IntArray(text.length)
+        val maxIndex = (text.length - 1).coerceAtLeast(1)
+        text.indices.forEach { index ->
+            if (text[index].isWhitespace()) {
+                colors[index] = Color.TRANSPARENT
+            } else {
+                colors[index] = computeSettleThemeColor(index, maxIndex, phaseDegrees)
+            }
+        }
+        return colors
+    }
+
+    private fun applyBlendedTitleColors(startColors: IntArray, endColors: IntArray, t: Float) {
+        val rainbowText = SpannableString(bifrostTitleLabel)
+        val blend = t.coerceIn(0f, 1f)
+        val maxIndex = (bifrostTitleLabel.length - 1).coerceAtLeast(1)
+
+        bifrostTitleLabel.indices.forEach { index ->
+            if (bifrostTitleLabel[index].isWhitespace()) return@forEach
+            val blended = androidx.core.graphics.ColorUtils.blendARGB(
+                startColors.getOrNull(index) ?: Color.WHITE,
+                endColors.getOrNull(index) ?: Color.WHITE,
+                blend
+            )
+            rainbowText.setSpan(
+                ForegroundColorSpan(blended),
+                index,
+                index + 1,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+        bifrostTitleText.text = rainbowText
     }
 
     private fun setupAnimationSpinner() {
@@ -1769,110 +1719,6 @@ class MainActivity : AppCompatActivity() {
         colorButton.setBackgroundColor(selectedColor)
         rightColorButton.setOnClickListener { showColorPicker(isRight = true) }
         rightColorButton.setBackgroundColor(selectedRightColor)
-
-        batteryLowColorButton.setOnClickListener {
-            showOptionalColorPicker(selectedBatteryLowColorOverride ?: DEFAULT_BATTERY_LOW_COLOR) {
-                selectedBatteryLowColorOverride = it
-                refreshPaletteButtons()
-                triggerPaletteLiveUpdateIfRunning()
-            }
-        }
-        batteryMidColorButton.setOnClickListener {
-            showOptionalColorPicker(selectedBatteryMidColorOverride ?: DEFAULT_BATTERY_MID_COLOR) {
-                selectedBatteryMidColorOverride = it
-                refreshPaletteButtons()
-                triggerPaletteLiveUpdateIfRunning()
-            }
-        }
-        batteryHighColorButton.setOnClickListener {
-            showOptionalColorPicker(selectedBatteryHighColorOverride ?: DEFAULT_BATTERY_HIGH_COLOR) {
-                selectedBatteryHighColorOverride = it
-                refreshPaletteButtons()
-                triggerPaletteLiveUpdateIfRunning()
-            }
-        }
-        cpuCoolColorButton.setOnClickListener {
-            showOptionalColorPicker(selectedCpuCoolColorOverride ?: DEFAULT_CPU_COOL_COLOR) {
-                selectedCpuCoolColorOverride = it
-                refreshPaletteButtons()
-                triggerPaletteLiveUpdateIfRunning()
-            }
-        }
-        cpuWarmColorButton.setOnClickListener {
-            showOptionalColorPicker(selectedCpuWarmColorOverride ?: DEFAULT_CPU_WARM_COLOR) {
-                selectedCpuWarmColorOverride = it
-                refreshPaletteButtons()
-                triggerPaletteLiveUpdateIfRunning()
-            }
-        }
-        cpuHotColorButton.setOnClickListener {
-            showOptionalColorPicker(selectedCpuHotColorOverride ?: DEFAULT_CPU_HOT_COLOR) {
-                selectedCpuHotColorOverride = it
-                refreshPaletteButtons()
-                triggerPaletteLiveUpdateIfRunning()
-            }
-        }
-
-        // Long press resets the override to the built-in default gradient color.
-        batteryLowColorButton.setOnLongClickListener {
-            selectedBatteryLowColorOverride = null
-            refreshPaletteButtons()
-            triggerPaletteLiveUpdateIfRunning()
-            true
-        }
-        batteryMidColorButton.setOnLongClickListener {
-            selectedBatteryMidColorOverride = null
-            refreshPaletteButtons()
-            triggerPaletteLiveUpdateIfRunning()
-            true
-        }
-        batteryHighColorButton.setOnLongClickListener {
-            selectedBatteryHighColorOverride = null
-            refreshPaletteButtons()
-            triggerPaletteLiveUpdateIfRunning()
-            true
-        }
-        cpuCoolColorButton.setOnLongClickListener {
-            selectedCpuCoolColorOverride = null
-            refreshPaletteButtons()
-            triggerPaletteLiveUpdateIfRunning()
-            true
-        }
-        cpuWarmColorButton.setOnLongClickListener {
-            selectedCpuWarmColorOverride = null
-            refreshPaletteButtons()
-            triggerPaletteLiveUpdateIfRunning()
-            true
-        }
-        cpuHotColorButton.setOnLongClickListener {
-            selectedCpuHotColorOverride = null
-            refreshPaletteButtons()
-            triggerPaletteLiveUpdateIfRunning()
-            true
-        }
-
-        refreshPaletteButtons()
-    }
-
-    private fun showOptionalColorPicker(initialColor: Int, onColorPicked: (Int) -> Unit) {
-        colorPickerDialog.show(activity = this, initialColor = initialColor) { color ->
-            onColorPicked(color)
-        }
-    }
-
-    private fun triggerPaletteLiveUpdateIfRunning() {
-        if (LEDService.isRunning && !serviceController.isServiceTransitioning && !isUpdatingFromPreset) {
-            sendLiveUpdateToLedService()
-        }
-    }
-
-    private fun refreshPaletteButtons() {
-        batteryLowColorButton.setBackgroundColor(selectedBatteryLowColorOverride ?: DEFAULT_BATTERY_LOW_COLOR)
-        batteryMidColorButton.setBackgroundColor(selectedBatteryMidColorOverride ?: DEFAULT_BATTERY_MID_COLOR)
-        batteryHighColorButton.setBackgroundColor(selectedBatteryHighColorOverride ?: DEFAULT_BATTERY_HIGH_COLOR)
-        cpuCoolColorButton.setBackgroundColor(selectedCpuCoolColorOverride ?: DEFAULT_CPU_COOL_COLOR)
-        cpuWarmColorButton.setBackgroundColor(selectedCpuWarmColorOverride ?: DEFAULT_CPU_WARM_COLOR)
-        cpuHotColorButton.setBackgroundColor(selectedCpuHotColorOverride ?: DEFAULT_CPU_HOT_COLOR)
     }
 
     private fun setupBrightnessSeekBar() {
@@ -2047,6 +1893,7 @@ class MainActivity : AppCompatActivity() {
         pluggedBatteryOverrideSwitch.setOnCheckedChangeListener { _, isChecked ->
             selectedBatteryOverrideWhenPlugged = isChecked
             prefs.edit().putBoolean(PREF_BATTERY_OVERRIDE_WHEN_PLUGGED, isChecked).apply()
+            updateParameterVisibility()
 
             if (LEDService.isRunning && !serviceController.isServiceTransitioning) {
                 sendLiveUpdateToLedService()
@@ -2162,26 +2009,6 @@ class MainActivity : AppCompatActivity() {
             handleAppProfileToggleChange(isChecked)
         }
 
-        appProfileDefaultSwitch.setOnCheckedChangeListener { _, isChecked ->
-            if (isSyncingAppProfileDefaultSwitch || !::presetController.isInitialized) {
-                return@setOnCheckedChangeListener
-            }
-
-            val selectedIndex = presetSpinner.selectedItemPosition
-            val changed = presetController.setAppProfileDefaultPreset(selectedIndex, isChecked)
-            if (!changed) {
-                syncAppProfileDefaultSwitch()
-                return@setOnCheckedChangeListener
-            }
-
-            refreshCoverFlowFromPresets()
-
-            if (appProfileManager.isEnabled && LEDService.isRunning && !serviceController.isServiceTransitioning) {
-                appProfileManager.resetLastForegroundPackage()
-                requestImmediateAppProfileResolution()
-            }
-        }
-
         assignAppButton.setOnClickListener { showAppPickerDialog() }
         manageAppsButton.setOnClickListener { showMappingsDialog() }
     }
@@ -2216,7 +2043,7 @@ class MainActivity : AppCompatActivity() {
                 val text = row.findViewById<TextView>(android.R.id.text1)
                 icon.setImageDrawable(ri.loadIcon(pm))
                 text.text = ri.loadLabel(pm)
-                text.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.bifrost_text))
+                text.setTextColor(selectedUiTheme.textColor)
                 return row
             }
         }
@@ -2268,7 +2095,7 @@ class MainActivity : AppCompatActivity() {
                         pm.getApplicationIcon(pkg)
                     } catch (_: Exception) { null })
                     text.text = "$appName -> $presetName"
-                    text.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.bifrost_text))
+                    text.setTextColor(selectedUiTheme.textColor)
                     return row
                 }
             }
@@ -2306,13 +2133,7 @@ class MainActivity : AppCompatActivity() {
             useSingleColor = selectedUseSingleColor,
             breatheWhenCharging = selectedBreatheWhenCharging,
             indicateChargingSpeed = selectedIndicateChargingSpeed,
-            flashWhenReady = selectedFlashWhenReady,
-            batteryLowColorOverride = selectedBatteryLowColorOverride,
-            batteryMidColorOverride = selectedBatteryMidColorOverride,
-            batteryHighColorOverride = selectedBatteryHighColorOverride,
-            cpuCoolColorOverride = selectedCpuCoolColorOverride,
-            cpuWarmColorOverride = selectedCpuWarmColorOverride,
-            cpuHotColorOverride = selectedCpuHotColorOverride
+            flashWhenReady = selectedFlashWhenReady
         )
 
         presetController = PresetController(
@@ -2338,13 +2159,7 @@ class MainActivity : AppCompatActivity() {
                     useSingleColor = selectedUseSingleColor,
                     breatheWhenCharging = selectedBreatheWhenCharging,
                     indicateChargingSpeed = selectedIndicateChargingSpeed,
-                    flashWhenReady = selectedFlashWhenReady,
-                    batteryLowColorOverride = selectedBatteryLowColorOverride,
-                    batteryMidColorOverride = selectedBatteryMidColorOverride,
-                    batteryHighColorOverride = selectedBatteryHighColorOverride,
-                    cpuCoolColorOverride = selectedCpuCoolColorOverride,
-                    cpuWarmColorOverride = selectedCpuWarmColorOverride,
-                    cpuHotColorOverride = selectedCpuHotColorOverride
+                    flashWhenReady = selectedFlashWhenReady
                 )
             },
             applyPresetToUi = { preset ->
@@ -2362,12 +2177,6 @@ class MainActivity : AppCompatActivity() {
                 selectedBreatheWhenCharging = preset.breatheWhenCharging
                 selectedIndicateChargingSpeed = preset.indicateChargingSpeed
                 selectedFlashWhenReady = preset.flashWhenReady
-                selectedBatteryLowColorOverride = preset.batteryLowColorOverride
-                selectedBatteryMidColorOverride = preset.batteryMidColorOverride
-                selectedBatteryHighColorOverride = preset.batteryHighColorOverride
-                selectedCpuCoolColorOverride = preset.cpuCoolColorOverride
-                selectedCpuWarmColorOverride = preset.cpuWarmColorOverride
-                selectedCpuHotColorOverride = preset.cpuHotColorOverride
 
                 val types = LedAnimationType.values().toList()
                 animationSpinner.setSelection(types.indexOf(selectedAnimationType).coerceAtLeast(0))
@@ -2388,8 +2197,6 @@ class MainActivity : AppCompatActivity() {
                 breatheWhenChargingSwitch.isChecked = selectedBreatheWhenCharging
                 chargingSpeedIndicatorSwitch.isChecked = selectedIndicateChargingSpeed
                 flashWhenReadySwitch.isChecked = selectedFlashWhenReady
-                refreshPaletteButtons()
-                syncAppProfileDefaultSwitch()
 
                 updateParameterVisibility()
             },
@@ -2398,6 +2205,9 @@ class MainActivity : AppCompatActivity() {
             },
             isUpdatingFromPreset = {
                 isUpdatingFromPreset
+            },
+            onRequestCustomPresetImage = { index ->
+                launchPresetImagePicker(index)
             },
             onPresetApplied = {
                 if (LEDService.isRunning) {
@@ -2413,176 +2223,16 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 refreshCoverFlowFromPresets()
-            },
-            onRequestCustomPresetImage = { index ->
-                launchPresetImagePicker(index)
-            },
-            onPresetRenamed = { oldName, newName ->
-                appProfileManager.renamePresetInMappings(oldName, newName)
             }
         )
 
         presetController.init(initialConfigPreset)
         refreshCoverFlowFromPresets()
-        syncAppProfileDefaultSwitch()
-
-        exportPresetsButton.setOnClickListener {
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            exportPresetsLauncher.launch("bifrost_presets_$timestamp.bifrost_preset")
-        }
-
-        importPresetsButton.setOnClickListener {
-            importPresetsLauncher.launch(arrayOf("*/*"))
-        }
 
         // If the app switching feature is already enabled, start syncing the UI after presets load.
         if (::appProfileManager.isInitialized && appProfileManager.isEnabled) {
             startAppProfileSync()
         }
-    }
-
-    private fun exportPresetBundle(uri: Uri) {
-        val result = runCatching {
-            PresetArchiveTransfer.exportToUri(
-                context = this,
-                uri = uri,
-                presets = presetController.getPresets(),
-                mappings = appProfileManager.getMappings()
-            )
-        }.getOrElse {
-            Toast.makeText(this, "Preset export failed", Toast.LENGTH_LONG).show()
-            return
-        }
-
-        if (result.warnings.isEmpty()) {
-            Toast.makeText(
-                this,
-                "Exported ${result.presetCount} presets (${result.iconCount} icons)",
-                Toast.LENGTH_LONG
-            ).show()
-            return
-        }
-
-        val warningText = result.warnings.joinToString("\n")
-        BifrostAlertDialog().show(
-            activity = this,
-            title = "EXPORT COMPLETED",
-            subtitle = "Exported ${result.presetCount} presets with ${result.warnings.size} warning(s)",
-            body = warningText,
-            positiveLabelResId = R.string.alert_action_ok,
-            negativeLabelResId = null,
-            cancelable = true,
-            onConfirm = {}
-        )
-    }
-
-    private fun importPresetBundle(uri: Uri) {
-        val result = runCatching {
-            PresetArchiveTransfer.importFromUri(this, uri)
-        }.getOrElse {
-            BifrostAlertDialog().show(
-                activity = this,
-                title = "IMPORT FAILED",
-                subtitle = "Selected file could not be imported",
-                body = it.message,
-                positiveLabelResId = R.string.alert_action_ok,
-                negativeLabelResId = null,
-                cancelable = true,
-                onConfirm = {}
-            )
-            return
-        }
-
-        if (result.presets.isEmpty()) {
-            showImportReport(result)
-            return
-        }
-
-        BifrostAlertDialog().show(
-            activity = this,
-            title = "IMPORT MODE",
-            subtitle = "Choose how to apply imported presets",
-            body = "Replace everything: current presets are overwritten.\nAdd: imported presets are appended to existing ones.",
-            positiveLabelResId = R.string.action_replace,
-            negativeLabelResId = R.string.action_add,
-            cancelable = true,
-            onConfirm = {
-                applyImportedBundle(result, replaceEverything = true)
-            },
-            onCancel = {
-                applyImportedBundle(result, replaceEverything = false)
-            }
-        )
-    }
-
-    private fun applyImportedBundle(
-        result: PresetArchiveTransfer.ImportResult,
-        replaceEverything: Boolean
-    ) {
-        val presetsApplied = if (replaceEverything) {
-            presetController.replaceAllPresetsFromImport(result.presets)
-        } else {
-            presetController.appendPresetsFromImport(result.presets)
-        }
-
-        if (presetsApplied) {
-            if (replaceEverything) {
-                appProfileManager.replaceMappings(result.mappings)
-            } else {
-                val mergedMappings = appProfileManager.getMappings().toMutableMap().apply {
-                    putAll(result.mappings)
-                }
-                appProfileManager.replaceMappings(mergedMappings)
-            }
-
-            refreshCoverFlowFromPresets()
-
-            if (LEDService.isRunning && !serviceController.isServiceTransitioning) {
-                if (appProfileManager.isEnabled) {
-                    appProfileManager.resetLastForegroundPackage()
-                    requestImmediateAppProfileResolution()
-                } else {
-                    startService(createLedServiceIntent())
-                }
-            }
-        }
-
-        showImportReport(result)
-    }
-
-    private fun showImportReport(result: PresetArchiveTransfer.ImportResult) {
-        val totalIssues = result.errors.size + result.warnings.size
-        val subtitle = if (result.presets.isEmpty()) {
-            "No presets imported"
-        } else {
-            "Imported ${result.presets.size} presets"
-        }
-
-        val body = buildString {
-            if (result.errors.isNotEmpty()) {
-                append("Errors:\n")
-                append(result.errors.joinToString("\n"))
-            }
-            if (result.warnings.isNotEmpty()) {
-                if (isNotEmpty()) append("\n\n")
-                append("Warnings:\n")
-                append(result.warnings.joinToString("\n"))
-            }
-            if (isEmpty()) {
-                append("Import completed successfully.")
-            }
-        }
-
-        BifrostAlertDialog().show(
-            activity = this,
-            title = if (totalIssues == 0) "IMPORT COMPLETED" else "IMPORT COMPLETED WITH NOTES",
-            subtitle = subtitle,
-            body = body,
-            positiveLabelResId = R.string.alert_action_ok,
-            negativeLabelResId = null,
-            cancelable = true,
-            onConfirm = {}
-        )
     }
 
     private fun updateParameterVisibility() {
@@ -2597,12 +2247,9 @@ class MainActivity : AppCompatActivity() {
                 selectedAnimationType == LedAnimationType.AMBIAURORA
         val needsSingleColor = selectedAnimationType == LedAnimationType.AMBILIGHT ||
                 selectedAnimationType == LedAnimationType.AMBIAURORA
-        val needsBreatheWhenCharging = selectedAnimationType == LedAnimationType.BATTERY_INDICATOR
-        val needsChargingSpeedIndicator = selectedAnimationType == LedAnimationType.BATTERY_INDICATOR &&
-            selectedBreatheWhenCharging
-        val needsFlashWhenReady = selectedAnimationType == LedAnimationType.BATTERY_INDICATOR
-        val needsBatteryPalette = selectedAnimationType == LedAnimationType.BATTERY_INDICATOR
-        val needsCpuPalette = selectedAnimationType == LedAnimationType.CPU_TEMPERATURE
+        val shouldShowBatteryModeConfig =
+            selectedBatteryOverrideWhenPlugged || selectedAnimationType == LedAnimationType.BATTERY_INDICATOR
+        val needsChargingSpeedIndicator = shouldShowBatteryModeConfig && selectedBreatheWhenCharging
 
         val supportsBrightness = true
 
@@ -2620,8 +2267,20 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        val batteryModeConfigContainer = findViewById<View>(R.id.batteryModeConfigContainer)
+        val breatheWhenChargingRow = findViewById<View>(R.id.breatheWhenChargingRow)
+        val chargingSpeedIndicatorRow = findViewById<View>(R.id.chargingSpeedIndicatorRow)
+        val flashWhenReadyRow = findViewById<View>(R.id.flashWhenReadyRow)
+        val batteryPaletteRow = findViewById<View>(R.id.batteryPaletteRow)
+
+        batteryModeConfigContainer?.visibility = if (shouldShowBatteryModeConfig) View.VISIBLE else View.GONE
+        breatheWhenChargingRow?.visibility = if (shouldShowBatteryModeConfig) View.VISIBLE else View.GONE
+        chargingSpeedIndicatorRow?.visibility = if (needsChargingSpeedIndicator) View.VISIBLE else View.GONE
+        flashWhenReadyRow?.visibility = if (shouldShowBatteryModeConfig) View.VISIBLE else View.GONE
+        batteryPaletteRow?.visibility = if (shouldShowBatteryModeConfig) View.VISIBLE else View.GONE
+
         performanceCard.visibility = if (needsProfile) View.VISIBLE else View.GONE
-        animationCard.visibility = if (needsSpeed || needsSmoothness || needsSensitivity || needsSaturationBoost || needsCustomSampling || needsSingleColor || needsBreatheWhenCharging || needsChargingSpeedIndicator || needsFlashWhenReady || needsBatteryPalette || needsCpuPalette) View.VISIBLE else View.GONE
+        animationCard.visibility = if (needsSpeed || needsSmoothness || needsSensitivity || needsSaturationBoost || needsCustomSampling || needsSingleColor) View.VISIBLE else View.GONE
 
         if (animationCard.visibility == View.VISIBLE) {
             val speedLabel = findViewById<View>(R.id.speedLabel)
@@ -2630,11 +2289,6 @@ class MainActivity : AppCompatActivity() {
             val saturationBoostLabel = findViewById<View>(R.id.saturationBoostLabel)
             val customSamplingLabel = findViewById<View>(R.id.customSamplingLabel)
             val singleColorLabel = findViewById<View>(R.id.singleColorLabel)
-            val breatheWhenChargingRow = findViewById<View>(R.id.breatheWhenChargingRow)
-            val chargingSpeedIndicatorRow = findViewById<View>(R.id.chargingSpeedIndicatorRow)
-            val flashWhenReadyRow = findViewById<View>(R.id.flashWhenReadyRow)
-            val batteryPaletteRow = findViewById<View>(R.id.batteryPaletteRow)
-            val cpuPaletteRow = findViewById<View>(R.id.cpuPaletteRow)
             val ignoreletterbox = findViewById<View>(R.id.ignoreletterbox)
             var bothSticksSameColor = findViewById<View>(R.id.bothSticksSameColor)
 
@@ -2657,12 +2311,6 @@ class MainActivity : AppCompatActivity() {
             singleColorLabel?.visibility = if (needsSingleColor) View.VISIBLE else View.GONE
             singleColorSwitch.visibility = if (needsSingleColor) View.VISIBLE else View.GONE
             bothSticksSameColor.visibility = if (needsSingleColor) View.VISIBLE else View.GONE
-
-            breatheWhenChargingRow?.visibility = if (needsBreatheWhenCharging) View.VISIBLE else View.GONE
-            chargingSpeedIndicatorRow?.visibility = if (needsChargingSpeedIndicator) View.VISIBLE else View.GONE
-            flashWhenReadyRow?.visibility = if (needsFlashWhenReady) View.VISIBLE else View.GONE
-            batteryPaletteRow?.visibility = if (needsBatteryPalette) View.VISIBLE else View.GONE
-            cpuPaletteRow?.visibility = if (needsCpuPalette) View.VISIBLE else View.GONE
         }
     }
 
@@ -2687,11 +2335,10 @@ class MainActivity : AppCompatActivity() {
     private fun enableRainbowBackground(enabled: Boolean) {
         if (enabled) {
             if (rainbowDrawable == null) rainbowDrawable = AnimatedRainbowDrawable()
-            systemStatusContainer.background = rainbowDrawable
             rainbowDrawable?.start()
         } else {
             rainbowDrawable?.stop()
-            systemStatusContainer.setBackgroundResource(R.drawable.card_glow_bg)
+            systemStatusContainer.background = null
         }
     }
 
@@ -2791,12 +2438,6 @@ class MainActivity : AppCompatActivity() {
             putExtra("breatheWhenCharging", selectedBreatheWhenCharging)
             putExtra("indicateChargingSpeed", selectedIndicateChargingSpeed)
             putExtra("flashWhenReady", selectedFlashWhenReady)
-            putOptionalColorExtra(this, EXTRA_BATTERY_LOW_COLOR_OVERRIDE, selectedBatteryLowColorOverride)
-            putOptionalColorExtra(this, EXTRA_BATTERY_MID_COLOR_OVERRIDE, selectedBatteryMidColorOverride)
-            putOptionalColorExtra(this, EXTRA_BATTERY_HIGH_COLOR_OVERRIDE, selectedBatteryHighColorOverride)
-            putOptionalColorExtra(this, EXTRA_CPU_COOL_COLOR_OVERRIDE, selectedCpuCoolColorOverride)
-            putOptionalColorExtra(this, EXTRA_CPU_WARM_COLOR_OVERRIDE, selectedCpuWarmColorOverride)
-            putOptionalColorExtra(this, EXTRA_CPU_HOT_COLOR_OVERRIDE, selectedCpuHotColorOverride)
             putExtra(
                 LEDService.EXTRA_BATTERY_OVERRIDE_WHEN_PLUGGED,
                 selectedBatteryOverrideWhenPlugged
@@ -2833,12 +2474,6 @@ class MainActivity : AppCompatActivity() {
             putExtra("breatheWhenCharging", selectedBreatheWhenCharging)
             putExtra("indicateChargingSpeed", selectedIndicateChargingSpeed)
             putExtra("flashWhenReady", selectedFlashWhenReady)
-            putOptionalColorExtra(this, EXTRA_BATTERY_LOW_COLOR_OVERRIDE, selectedBatteryLowColorOverride)
-            putOptionalColorExtra(this, EXTRA_BATTERY_MID_COLOR_OVERRIDE, selectedBatteryMidColorOverride)
-            putOptionalColorExtra(this, EXTRA_BATTERY_HIGH_COLOR_OVERRIDE, selectedBatteryHighColorOverride)
-            putOptionalColorExtra(this, EXTRA_CPU_COOL_COLOR_OVERRIDE, selectedCpuCoolColorOverride)
-            putOptionalColorExtra(this, EXTRA_CPU_WARM_COLOR_OVERRIDE, selectedCpuWarmColorOverride)
-            putOptionalColorExtra(this, EXTRA_CPU_HOT_COLOR_OVERRIDE, selectedCpuHotColorOverride)
             putExtra(
                 LEDService.EXTRA_BATTERY_OVERRIDE_WHEN_PLUGGED,
                 selectedBatteryOverrideWhenPlugged
@@ -2849,10 +2484,6 @@ class MainActivity : AppCompatActivity() {
             )
         }
         startService(intent)
-    }
-
-    private fun putOptionalColorExtra(intent: Intent, key: String, value: Int?) {
-        intent.putExtra(key, value ?: COLOR_OVERRIDE_UNSET)
     }
 
     private fun showFirstLaunchAlertIfNeeded() {
@@ -2873,65 +2504,4 @@ class MainActivity : AppCompatActivity() {
             )
         }
     }
-
-    data class AssignedAppVisual(
-        val packageName: String,
-        val appName: String,
-        val icon: android.graphics.drawable.Drawable
-    )
-
-    private fun resolveAssignedAppVisuals(presetName: String): List<AssignedAppVisual> {
-        val mappings = appProfileManager.getMappings()
-        val pm = packageManager
-
-        return mappings
-            .asSequence()
-            .filter { (_, mappedPresetName) -> mappedPresetName == presetName }
-            .map { (packageName, _) -> packageName }
-            .distinct()
-            .mapNotNull { packageName ->
-                val info = runCatching { pm.getApplicationInfo(packageName, 0) }.getOrNull() ?: return@mapNotNull null
-                val appName = runCatching { pm.getApplicationLabel(info).toString() }.getOrNull()
-                    ?: packageName
-                val icon = runCatching { pm.getApplicationIcon(info) }.getOrNull() ?: return@mapNotNull null
-                AssignedAppVisual(packageName = packageName, appName = appName, icon = icon)
-            }
-            .sortedBy { it.appName.lowercase() }
-            .toList()
-    }
-
-    private fun maybeShowAppProfileInfoDialog(isEnabled: Boolean) {
-        if (!isEnabled) return
-        if (prefs.getBoolean(PREF_APP_PROFILE_INFO_SHOWN, false)) return
-
-        val title = resolveStringByName("app_profile_info_title", "APP PROFILE MODE")
-        val subtitle = resolveStringByName(
-            "app_profile_info_subtitle",
-            "Animations now switch automatically based on the foreground app."
-        )
-        val body = resolveStringByName(
-            "app_profile_info_body",
-            "In this mode, swiping presets will not change the running animation. Assign apps to presets in settings to control what plays automatically."
-        )
-
-        BifrostAlertDialog().show(
-            activity = this,
-            title = title,
-            subtitle = subtitle,
-            body = body,
-            positiveLabelResId = R.string.alert_action_ok,
-            negativeLabelResId = null,
-            cancelable = true,
-            onConfirm = {
-                prefs.edit().putBoolean(PREF_APP_PROFILE_INFO_SHOWN, true).apply()
-            }
-        )
-    }
-
-    private fun resolveStringByName(resourceName: String, fallback: String): String {
-        val resId = resources.getIdentifier(resourceName, "string", packageName)
-        if (resId == 0) return fallback
-        return runCatching { getString(resId) }.getOrDefault(fallback)
-    }
 }
-

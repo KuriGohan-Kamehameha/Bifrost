@@ -74,14 +74,12 @@ class LedController {
 
     fun setBrightness(brightness: Int) {
         val b = brightness.coerceIn(0, 255)
-        val commands = listOf(
-            "echo 1-0:0:0:$b > /sys/class/sn3112l/led/brightness",
-            "echo 2-0:0:0:$b > /sys/class/sn3112l/led/brightness",
-            "echo 1-0:0:0:$b > /sys/class/sn3112r/led/brightness",
-            "echo 2-0:0:0:$b > /sys/class/sn3112r/led/brightness"
-        )
-        val command = commands.joinToString(" && ")
-        executeCommandDirect(command)
+        val sb = StringBuilder(220)
+        sb.append("echo 1-0:0:0:").append(b).append(" > /sys/class/sn3112l/led/brightness")
+          .append(" && echo 2-0:0:0:").append(b).append(" > /sys/class/sn3112l/led/brightness")
+          .append(" && echo 1-0:0:0:").append(b).append(" > /sys/class/sn3112r/led/brightness")
+          .append(" && echo 2-0:0:0:").append(b).append(" > /sys/class/sn3112r/led/brightness")
+        executeCommandDirect(sb.toString())
     }
 
     private fun executeCommandDirect(command: String) {
@@ -97,16 +95,15 @@ class LedController {
 
             pServerBinder?.let { binder ->
                 val data = Parcel.obtain()
-                val reply = Parcel.obtain()
-
+                // FLAG_ONEWAY: the binder never writes a reply, so pass null to avoid a
+                // pointless Parcel allocation on every command.
                 try {
                     data.writeStringArray(arrayOf(command, "1"))
-                    binder.transact(0, data, reply, IBinder.FLAG_ONEWAY)
+                    binder.transact(0, data, null, IBinder.FLAG_ONEWAY)
                 } catch (e: Exception) {
                     Log.w(TAG, "LED transact failed", e)
                 } finally {
                     data.recycle()
-                    reply.recycle()
                 }
             }
         }

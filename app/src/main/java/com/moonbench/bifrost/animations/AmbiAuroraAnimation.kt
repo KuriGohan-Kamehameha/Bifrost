@@ -31,9 +31,13 @@ class AmbiAuroraAnimation(
     private var currentLeftColor = Color.BLACK
     private var currentRightColor = Color.BLACK
 
+    // Written by main-thread setters, read by the update HandlerThread — must be @Volatile
+    @Volatile
     private var targetBrightness: Int = 255
     private var currentBrightness: Int = 0
+    @Volatile
     private var response: Float = 0.5f
+    @Volatile
     private var sensitivity: Float = 0.5f
     private var saturationBoost: Float = initialSaturationBoost
     private var smoothedIntensity: Float = 0f

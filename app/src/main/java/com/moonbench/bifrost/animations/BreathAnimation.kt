@@ -73,6 +73,7 @@ class BreathAnimation(
 
             val speedFactor = 0.02 + 0.18 * speed
             phase += speedFactor
+            if (phase >= 2.0 * Math.PI) phase -= 2.0 * Math.PI
 
             handler.postDelayed(this, adjustedAnimationDelay(30L, targetBrightness))
         }
