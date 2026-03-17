@@ -18,6 +18,7 @@ import com.google.android.material.textfield.TextInputLayout
 import com.moonbench.bifrost.animations.LedAnimationType
 import com.moonbench.bifrost.tools.PerformanceProfile
 import com.moonbench.bifrost.ui.DeletePresetDialog
+import com.moonbench.bifrost.ui.BifrostAlertDialog
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -32,7 +33,9 @@ class PresetController(
     private val applyPresetToUi: (LedPreset) -> Unit,
     private val markIsUpdatingFromPreset: (Boolean) -> Unit,
     private val isUpdatingFromPreset: () -> Boolean,
-    private val onPresetApplied: () -> Unit
+    private val onPresetApplied: () -> Unit,
+    private val onRequestCustomPresetImage: (Int) -> Unit,
+    private val onPresetRenamed: (oldName: String, newName: String) -> Unit = { _, _ -> }
 ) {
 
     companion object {
@@ -44,9 +47,15 @@ class PresetController(
     private var selectedIndex: Int = 0
     private val deleteDialog = DeletePresetDialog()
 
+    private enum class CreatePresetDialogMode {
+        DEFAULT,
+        HOME_PLUS
+    }
+
     fun init(initialConfig: LedPreset): LedPreset {
         presets.clear()
         presets.addAll(loadPresetsFromPrefs())
+        normalizeAppProfileDefaultPreset()
         val initialPreset = resolveInitialPreset(initialConfig)
         markIsUpdatingFromPreset(true)
         applyPresetToUi(initialPreset)
@@ -55,7 +64,51 @@ class PresetController(
         return initialPreset
     }
 
+    private fun normalizeAppProfileDefaultPreset() {
+        val defaultIndexes = presets.mapIndexedNotNull { index, preset ->
+            if (preset.isAppProfileDefault) index else null
+        }
+        if (defaultIndexes.size <= 1) return
+
+        val keepIndex = defaultIndexes.first()
+        presets.indices.forEach { index ->
+            presets[index] = presets[index].copy(isAppProfileDefault = index == keepIndex)
+        }
+        savePresetsToPrefs()
+    }
+
     fun getPresets(): List<LedPreset> = presets
+
+
+    fun setAppProfileDefaultPreset(index: Int, isDefault: Boolean): Boolean {
+        if (index !in presets.indices) return false
+
+        val changed = if (isDefault) {
+            var hasChanges = false
+            presets.indices.forEach { i ->
+                val shouldBeDefault = (i == index)
+                if (presets[i].isAppProfileDefault != shouldBeDefault) {
+                    presets[i] = presets[i].copy(isAppProfileDefault = shouldBeDefault)
+                    hasChanges = true
+                }
+            }
+            hasChanges
+        } else {
+            if (!presets[index].isAppProfileDefault) {
+                false
+            } else {
+                presets[index] = presets[index].copy(isAppProfileDefault = false)
+                true
+            }
+        }
+
+        if (!changed) return false
+
+        val selectedName = presets.getOrNull(selectedIndex)?.name
+        savePresetsToPrefs()
+        refreshPresetSpinner(selectedName)
+        return true
+    }
 
     fun applyPresetAt(index: Int, syncSpinner: Boolean = true) {
         if (index !in presets.indices) return
@@ -72,6 +125,57 @@ class PresetController(
         markIsUpdatingFromPreset(false)
 
         onPresetApplied()
+    }
+
+    fun selectPresetForEditing(index: Int, syncSpinner: Boolean = true) {
+        if (index !in presets.indices) return
+
+        selectedIndex = index
+        val preset = presets[index]
+
+        markIsUpdatingFromPreset(true)
+        if (syncSpinner && presetSpinner.selectedItemPosition != index) {
+            presetSpinner.setSelection(index)
+        }
+        applyPresetToUi(preset)
+        markIsUpdatingFromPreset(false)
+    }
+
+    fun replaceAllPresetsFromImport(importedPresets: List<LedPreset>): Boolean {
+        if (importedPresets.isEmpty()) return false
+
+        presets.clear()
+        presets.addAll(importedPresets)
+        normalizeAppProfileDefaultPreset()
+
+        val firstPreset = presets.first()
+        savePresetsToPrefs()
+        saveLastPresetName(firstPreset.name)
+        refreshPresetSpinner(firstPreset.name)
+
+        markIsUpdatingFromPreset(true)
+        applyPresetToUi(firstPreset)
+        markIsUpdatingFromPreset(false)
+        return true
+    }
+
+    fun appendPresetsFromImport(importedPresets: List<LedPreset>): Boolean {
+        if (importedPresets.isEmpty()) return false
+
+        val selectedPresetNameBeforeImport = presets.getOrNull(selectedIndex)?.name
+        presets.addAll(importedPresets)
+        normalizeAppProfileDefaultPreset()
+
+        val selectedName = selectedPresetNameBeforeImport ?: presets.first().name
+        savePresetsToPrefs()
+        saveLastPresetName(selectedName)
+        refreshPresetSpinner(selectedName)
+
+        val presetToShow = presets.getOrNull(selectedIndex) ?: presets.first()
+        markIsUpdatingFromPreset(true)
+        applyPresetToUi(presetToShow)
+        markIsUpdatingFromPreset(false)
+        return true
     }
 
     fun movePreset(fromIndex: Int, toIndex: Int): Boolean {
@@ -112,12 +216,66 @@ class PresetController(
         savePresetsToPrefs()
     }
 
+    fun saveCurrentConfigToSelectedPreset(): Boolean {
+        if (selectedIndex !in presets.indices) return false
+
+        val current = presets[selectedIndex]
+        val base = getCurrentConfig()
+        val accepted = current.ragnarokAccepted || base.performanceProfile == PerformanceProfile.RAGNAROK
+
+        val updated = base.copy(
+            name = current.name,
+            isAppProfileDefault = current.isAppProfileDefault,
+            ragnarokAccepted = accepted,
+            icon = current.icon,
+            customEmoji = current.customEmoji,
+            customImageFileName = current.customImageFileName,
+            appIconPackageName = current.appIconPackageName
+        )
+
+        replacePreset(
+            index = selectedIndex,
+            updatedPreset = updated,
+            applyToUi = false,
+            notifyPresetApplied = false,
+            selectedNameAfterSave = current.name
+        )
+        return true
+    }
+
+    fun hasUnsavedChangesForSelectedPreset(): Boolean {
+        if (selectedIndex !in presets.indices) return false
+
+        val selectedPreset = presets[selectedIndex]
+        val current = getCurrentConfig()
+
+        return current.animationType != selectedPreset.animationType ||
+            current.performanceProfile != selectedPreset.performanceProfile ||
+            current.color != selectedPreset.color ||
+            current.rightColor != selectedPreset.rightColor ||
+            current.brightness != selectedPreset.brightness ||
+            current.speed != selectedPreset.speed ||
+            current.smoothness != selectedPreset.smoothness ||
+            current.sensitivity != selectedPreset.sensitivity ||
+            current.saturationBoost != selectedPreset.saturationBoost ||
+            current.useCustomSampling != selectedPreset.useCustomSampling ||
+            current.useSingleColor != selectedPreset.useSingleColor ||
+            current.breatheWhenCharging != selectedPreset.breatheWhenCharging ||
+            current.indicateChargingSpeed != selectedPreset.indicateChargingSpeed ||
+            current.flashWhenReady != selectedPreset.flashWhenReady
+    }
+
     private fun setupPresetControls(initialPreset: LedPreset) {
         refreshPresetSpinner(initialPreset.name)
 
         saveAsNewButton.setOnClickListener { showSaveAsNewPresetDialog() }
         modifyButton.setOnClickListener { modifyCurrentPreset() }
         deleteButton.setOnClickListener { showDeleteDialog() }
+        // Long-press on delete button -> delete ALL presets after confirmation
+        deleteButton.setOnLongClickListener {
+            showDeleteAllDialog()
+            true
+        }
 
         presetSpinner.onItemSelectedListener =
             object : AdapterView.OnItemSelectedListener {
@@ -180,6 +338,8 @@ class PresetController(
                 .takeIf { it.isNotBlank() }
             val customImageFileName = obj.optString("customImageFileName")
                 .takeIf { it.isNotBlank() }
+            val appIconPackageName = obj.optString("appIconPackageName")
+                .takeIf { it.isNotBlank() }
 
             val accepted = obj.optBoolean("ragnarokAccepted", false)
             val useCustomSampling = obj.optBoolean("useCustomSampling", false)
@@ -187,6 +347,7 @@ class PresetController(
             val breatheWhenCharging = obj.optBoolean("breatheWhenCharging", false)
             val indicateChargingSpeed = obj.optBoolean("indicateChargingSpeed", false)
             val flashWhenReady = obj.optBoolean("flashWhenReady", false)
+            val isAppProfileDefault = obj.optBoolean("isAppProfileDefault", false)
 
             val color = obj.optInt("color", Color.WHITE)
             list.add(
@@ -206,10 +367,18 @@ class PresetController(
                     breatheWhenCharging = breatheWhenCharging,
                     indicateChargingSpeed = indicateChargingSpeed,
                     flashWhenReady = flashWhenReady,
+                    batteryLowColorOverride = obj.optInt("batteryLowColorOverride").takeIf { obj.has("batteryLowColorOverride") },
+                    batteryMidColorOverride = obj.optInt("batteryMidColorOverride").takeIf { obj.has("batteryMidColorOverride") },
+                    batteryHighColorOverride = obj.optInt("batteryHighColorOverride").takeIf { obj.has("batteryHighColorOverride") },
+                    cpuCoolColorOverride = obj.optInt("cpuCoolColorOverride").takeIf { obj.has("cpuCoolColorOverride") },
+                    cpuWarmColorOverride = obj.optInt("cpuWarmColorOverride").takeIf { obj.has("cpuWarmColorOverride") },
+                    cpuHotColorOverride = obj.optInt("cpuHotColorOverride").takeIf { obj.has("cpuHotColorOverride") },
+                    isAppProfileDefault = isAppProfileDefault,
                     ragnarokAccepted = accepted,
                     icon = icon,
                     customEmoji = customEmoji,
-                    customImageFileName = customImageFileName
+                    customImageFileName = customImageFileName,
+                    appIconPackageName = appIconPackageName
                 )
             )
         }
@@ -237,10 +406,18 @@ class PresetController(
             obj.put("breatheWhenCharging", preset.breatheWhenCharging)
             obj.put("indicateChargingSpeed", preset.indicateChargingSpeed)
             obj.put("flashWhenReady", preset.flashWhenReady)
+            preset.batteryLowColorOverride?.let { obj.put("batteryLowColorOverride", it) }
+            preset.batteryMidColorOverride?.let { obj.put("batteryMidColorOverride", it) }
+            preset.batteryHighColorOverride?.let { obj.put("batteryHighColorOverride", it) }
+            preset.cpuCoolColorOverride?.let { obj.put("cpuCoolColorOverride", it) }
+            preset.cpuWarmColorOverride?.let { obj.put("cpuWarmColorOverride", it) }
+            preset.cpuHotColorOverride?.let { obj.put("cpuHotColorOverride", it) }
+            obj.put("isAppProfileDefault", preset.isAppProfileDefault)
             obj.put("ragnarokAccepted", preset.ragnarokAccepted)
             obj.put("icon", preset.icon.name)
             preset.customEmoji?.let { obj.put("customEmoji", it) }
             preset.customImageFileName?.let { obj.put("customImageFileName", it) }
+            preset.appIconPackageName?.let { obj.put("appIconPackageName", it) }
             array.put(obj)
         }
 
@@ -253,7 +430,10 @@ class PresetController(
 
     private fun resolveInitialPreset(initialConfig: LedPreset): LedPreset {
         if (presets.isEmpty()) {
-            val defaultPreset = initialConfig.copy(name = "Default")
+            val defaultPreset = initialConfig.copy(
+                name = "Default",
+                isAppProfileDefault = true
+            )
             presets.add(defaultPreset)
             savePresetsToPrefs()
             saveLastPresetName(defaultPreset.name)
@@ -271,34 +451,66 @@ class PresetController(
         return first
     }
 
-    private fun showSaveAsNewPresetDialog() {
+    fun showSaveAsNewPresetDialogFromHomePlus() {
+        showSaveAsNewPresetDialog(mode = CreatePresetDialogMode.HOME_PLUS)
+    }
+
+    private fun showSaveAsNewPresetDialog(mode: CreatePresetDialogMode = CreatePresetDialogMode.DEFAULT) {
         val defaultName = "Preset ${presets.size + 1}"
-        val initialIcon = presets.getOrNull(selectedIndex)?.icon
-            ?: PresetIcon.defaultFor(getCurrentConfig().animationType)
+
+        val title = if (mode == CreatePresetDialogMode.HOME_PLUS) {
+            "NEW PRESET"
+        } else {
+            "SAVE PRESET"
+        }
 
         showPresetEditorDialog(
-            title = "SAVE PRESET",
+            title = title,
             subtitle = "Name this configuration for quick access",
             positiveButtonLabel = "Save",
             initialName = defaultName,
-            initialIcon = initialIcon,
-            showNameInput = true
-        ) { rawName, icon ->
-                val base = getCurrentConfig()
-                val desired = if (rawName.isEmpty()) defaultName else rawName
-                val unique = ensureUniqueName(desired)
-                val newPreset = base.copy(
-                    name = unique,
-                    icon = icon,
-                    customEmoji = null,
-                    customImageFileName = null,
-                    ragnarokAccepted = base.performanceProfile == PerformanceProfile.RAGNAROK
+            showNameInput = true,
+            showCustomImageOption = mode == CreatePresetDialogMode.HOME_PLUS,
+            onConfirm = { rawName ->
+                createPresetFromInputs(
+                    rawName = rawName,
+                    defaultName = defaultName
                 )
-                presets.add(newPreset)
-                savePresetsToPrefs()
-                saveLastPresetName(unique)
-                refreshPresetSpinner(unique)
-        }
+            },
+            onConfirmWithCustomImage = { rawName ->
+                val newIndex = createPresetFromInputs(
+                    rawName = rawName,
+                    defaultName = defaultName
+                )
+                if (newIndex >= 0) {
+                    onRequestCustomPresetImage(newIndex)
+                }
+            }
+        )
+    }
+
+    private fun createPresetFromInputs(rawName: String, defaultName: String): Int {
+        val base = getCurrentConfig()
+        val desired = if (rawName.isEmpty()) defaultName else rawName
+        val unique = ensureUniqueName(desired)
+        val baseIcon = presets.getOrNull(selectedIndex)?.icon
+            ?: PresetIcon.defaultFor(base.animationType)
+        val newPreset = base.copy(
+            name = unique,
+            isAppProfileDefault = false,
+            icon = baseIcon,
+            customEmoji = null,
+            customImageFileName = null,
+            appIconPackageName = null,
+            ragnarokAccepted = base.performanceProfile == PerformanceProfile.RAGNAROK
+        )
+
+        presets.add(newPreset)
+        val newIndex = presets.lastIndex
+        savePresetsToPrefs()
+        saveLastPresetName(unique)
+        refreshPresetSpinner(unique)
+        return newIndex
     }
 
     private fun ensureUniqueName(base: String): String {
@@ -317,29 +529,49 @@ class PresetController(
         val current = presets[selectedIndex]
         showPresetEditorDialog(
             title = "UPDATE PRESET",
-            subtitle = "Save the current configuration to ${current.name} and choose its icon",
+            subtitle = "Update and rename ${current.name} if needed",
             positiveButtonLabel = "Update",
             initialName = current.name,
-            initialIcon = current.icon,
-            showNameInput = false
-        ) { _, icon ->
+            showNameInput = true
+        ) { rawName ->
             val base = getCurrentConfig()
             val accepted = current.ragnarokAccepted || base.performanceProfile == PerformanceProfile.RAGNAROK
+            val desiredName = rawName.ifBlank { current.name }
+            val finalName = ensureUniqueNameForUpdate(desiredName, selectedIndex)
+
+            if (finalName != current.name) {
+                onPresetRenamed(current.name, finalName)
+            }
 
             val final = base.copy(
-                name = current.name,
+                name = finalName,
+                isAppProfileDefault = current.isAppProfileDefault,
                 ragnarokAccepted = accepted,
-                icon = icon,
-                customEmoji = null,
-                customImageFileName = null
+                icon = current.icon,
+                customEmoji = current.customEmoji,
+                customImageFileName = current.customImageFileName,
+                appIconPackageName = current.appIconPackageName
             )
 
             replacePreset(
                 index = selectedIndex,
                 updatedPreset = final,
                 applyToUi = true,
-                notifyPresetApplied = true
+                notifyPresetApplied = true,
+                selectedNameAfterSave = finalName
             )
+        }
+    }
+
+    private fun ensureUniqueNameForUpdate(base: String, editingIndex: Int): String {
+        if (presets.indices.none { it != editingIndex && presets[it].name == base }) return base
+        var i = 2
+        while (true) {
+            val candidate = "$base ($i)"
+            if (presets.indices.none { it != editingIndex && presets[it].name == candidate }) {
+                return candidate
+            }
+            i++
         }
     }
 
@@ -383,9 +615,10 @@ class PresetController(
         subtitle: String,
         positiveButtonLabel: String,
         initialName: String,
-        initialIcon: PresetIcon,
         showNameInput: Boolean,
-        onConfirm: (String, PresetIcon) -> Unit
+        showCustomImageOption: Boolean = false,
+        onConfirmWithCustomImage: ((String) -> Unit)? = null,
+        onConfirm: (String) -> Unit
     ) {
         val inflater = LayoutInflater.from(activity)
         val view = inflater.inflate(R.layout.dialog_preset_name, null)
@@ -393,8 +626,7 @@ class PresetController(
         val subtitleView = view.findViewById<TextView>(R.id.dialogSubtitle)
         val nameInputLayout = view.findViewById<TextInputLayout>(R.id.presetNameInputLayout)
         val nameInput = view.findViewById<TextInputEditText>(R.id.presetNameInput)
-        val iconSpinner = view.findViewById<Spinner>(R.id.presetIconSpinner)
-        val icons = PresetIcon.values().toList()
+        val customImageButton = view.findViewById<MaterialButton>(R.id.presetCustomImageButton)
 
         titleView.text = title
         subtitleView.text = subtitle
@@ -405,15 +637,7 @@ class PresetController(
             nameInput.setSelection(initialName.length)
         }
 
-        iconSpinner.adapter = IconLabelSpinnerAdapter(
-            activity = activity,
-            items = icons,
-            itemLayoutRes = R.layout.item_spinner_preset,
-            dropdownLayoutRes = R.layout.item_spinner_preset_dropdown,
-            labelProvider = { it.label },
-            visualProvider = { PresetVisuals.fromBuiltIn(it) }
-        )
-        iconSpinner.setSelection(icons.indexOf(initialIcon).coerceAtLeast(0), false)
+        customImageButton.visibility = if (showCustomImageOption) View.VISIBLE else View.GONE
 
         val dialog = androidx.appcompat.app.AlertDialog.Builder(activity)
             .setView(view)
@@ -423,13 +647,25 @@ class PresetController(
                 } else {
                     initialName
                 }
-                val resolvedIcon = icons.getOrElse(iconSpinner.selectedItemPosition) { initialIcon }
-                onConfirm(resolvedName, resolvedIcon)
+                onConfirm(resolvedName)
             }
             .setNegativeButton("Cancel", null)
             .create()
 
         dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+
+        if (showCustomImageOption && onConfirmWithCustomImage != null) {
+            customImageButton.setOnClickListener {
+                val resolvedName = if (showNameInput) {
+                    nameInput.text?.toString()?.trim().orEmpty()
+                } else {
+                    initialName
+                }
+                dialog.dismiss()
+                onConfirmWithCustomImage.invoke(resolvedName)
+            }
+        }
+
         dialog.show()
     }
 
@@ -460,6 +696,43 @@ class PresetController(
                 }
             }
         )
+    }
+
+    private fun showDeleteAllDialog() {
+        val title = activity.getString(R.string.delete_all_presets_title)
+        val body = activity.getString(R.string.delete_all_presets_body)
+
+        BifrostAlertDialog().show(
+            activity = activity,
+            title = title,
+            subtitle = null,
+            body = body,
+            positiveLabelResId = R.string.action_delete_all,
+            negativeLabelResId = R.string.action_cancel,
+            cancelable = true,
+            onConfirm = {
+                deleteAllPresets()
+            },
+            onCancel = {}
+        )
+    }
+
+    private fun deleteAllPresets() {
+        // Remove custom images
+        presets.forEach { PresetImageStorage.deleteIfExists(activity, it.customImageFileName) }
+
+        // Clear list and persist
+        presets.clear()
+        savePresetsToPrefs()
+        saveLastPresetName("")
+        refreshPresetSpinner(null)
+
+        // Ensure there's a stable preset in the UI (resolveInitialPreset will add a default if empty)
+        val defaultPreset = resolveInitialPreset(getCurrentConfig())
+        markIsUpdatingFromPreset(true)
+        applyPresetToUi(defaultPreset)
+        markIsUpdatingFromPreset(false)
+        onPresetApplied()
     }
 }
 
