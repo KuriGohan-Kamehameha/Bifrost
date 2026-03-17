@@ -27,8 +27,11 @@ class AmbilightAnimation(
     private var currentLeftColor = Color.BLACK
     private var currentRightColor = Color.BLACK
 
+    // Written from main thread (setters), read from ScreenCapture HandlerThread — must be @Volatile
+    @Volatile
     private var targetBrightness: Int = 255
     private var currentBrightness: Int = 255
+    @Volatile
     private var response: Float = 0.5f
     private var saturationBoost: Float = initialSaturationBoost
     private var lastLedUpdateAt = 0L

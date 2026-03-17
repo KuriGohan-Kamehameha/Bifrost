@@ -1,177 +1,33 @@
-# Bifrost -- LED Controller for the AYN Thor
+# Bifrost (fork)
 
-Bifrost is a custom LED controller for the **AYN Thor** handheld (and might work for other handhelds).\
-It provides a collection of LED animations that can run in the
-background, including:
+This repository is a **fork of** [Pollux-MoonBench/Bifrost](https://github.com/Pollux-MoonBench/Bifrost).
+For full feature details, installation instructions, and general usage, see the upstream README:
 
-- **Ambilight**
-- **Audio Reactive**
-- **Ambi Aurora** (a mix of Ambilight + Audio Reactive)
-- **Classic animations:** Breath, Rainbow, Pulse, and more
+https://github.com/Pollux-MoonBench/Bifrost/blob/main/README.md
 
-Bifrost aims to bring a vibrant, customizable lighting experience to the
-AYN Thor while keeping performance and battery consumption in mind.
+---
 
-> ⚠️ **Important:** For animations to work, **Bifrost must stay alive in
-> the background**.\
-> Closing the app or restricting notification (and screen recording for Ambilight) activity will stop LED
-> updates.
+## 🔧 What this fork changes
 
-------------------------------------------------------------------------
+This fork remains aligned with upstream but adds the following enhancements:
 
-## ✨ Features
+- Animated header/logo with rainbow/watercolor title effects.
+- UI theming support (built-in themes + theme import/export).
+- Auto-start on boot and improved AYN Thor device integration.
+- Improved charging indicator behavior.
+- Releases (APK assets) published from this fork.
 
-### **Ambilight**
+---
 
-Uses Android's screen recording API to sample the screen's left and
-right average colors.\
-For performance, Bifrost captures the screen in **2×1 pixels** and reads
-the RGB values directly from the buffer.
+## 📦 Releases
 
+Builds are published via GitHub Releases. Download the latest APK from:
+https://github.com/KuriGohan-Kamehameha/Bifrost/releases
 
-**New options:**
-- **Custom color sampler** to eliminate pillarboxing/letterboxing and favor more vivid colors (useful for older content)
-- **Single color mode** to calculate one shared color for both sticks
-- **Saturation boost slider** for more intense colors
-- **Hex color input** for precise color selection
-
-When choosing the custom colors sampler, Bifrost captures the screen using a
-**low-resolution 32-pixel**, which allows more advanced color
-analysis while remaining lightweight, it:
-- **Favors saturated colors** to improve vibrancy
-- Helps eliminate pillarboxing and letterboxing
-
-### **Audio Reactive**
-
-Analyzes live audio levels (using the screen recording permission) to
-drive LED intensity.
-
-**Improvements:**
-- Redesigned **reactivity system** using a single, unified reactivity slider
-- Improved responsiveness and smoother audio-driven animations
-
-### **Ambi Aurora**
-
-Combines Ambilight color sampling with Audio Reactive intensity for a
-hybrid effect.
-
-**Enhancements:**
-- Improved color calculation
-- Supports **custom sampling**, **single color mode**, and **saturation boost**
-
-### **Animation Presets**
-
-- Save multiple animation presets with their own settings
-- Automatically loads the **last selected preset** on app launch
-- Easy organization and quick switching
-
-### **Performance Profiles**
-
-Bifrost offers multiple performance-level modes.\
-The **Ragnarok profile** updates the Thor LED controller **as fast as
-possible**, which may cause latency or even crashes.
-
-------------------------------------------------------------------------
-
-## 📦 Installation
-
-Bifrost can be installed in two different ways:
-
-### **Method 1 — Manual APK install**
-
-1. Download the latest **APK** from the GitHub releases page.
-2. Open your **Downloads** folder.
-3. Tap the APK file to start the installation.
-4. If Android asks to allow installation from **unknown sources**, accept the permission.
-5. Complete the installation.
-
-### **Method 2 — Install & update via Obtainium (recommended)**
-
-If you use **Obtainium**, you can automatically receive updates:
-
-1. Open the Obtainium app. It can be found here : https://github.com/ImranR98/Obtainium
-2. Add a new app using this fork as a source: https://github.com/KuriGohan-Kamehameha/Bifrost/releases/
-   (Optionally, Add using the original source: https://github.com/Pollux-MoonBench/Bifrost/releases/)
-3. Follow the Obtainium installation process
-------------------------------------------------------------------------
-
-## 🔒 Required Permissions
-
-To enable Ambilight, Audio Reactive, and Ambi Aurora modes, Bifrost
-requires:
-
-- **Screen recording permission**\
-  Used exclusively to sample colors (Ambilight) and volume intensity
-  (Audio Reactive).
-
-Bifrost does *not* save or transmit screen contents — sampling happens
-locally and is reduced to minimal pixel data for efficiency.
-
-------------------------------------------------------------------------
-
-## 🎮 Other Tested Devices
-
-Bifrost has been tested and confirmed to work on the following devices:
-
-AYN
-- Thor
-- Odin 2 Portal Pro
-
-Retroid
-- Pocket Mini V2
-- Pocket 5
-
-------------------------------------------------------------------------
-
-## ⚠️ In Dev Status
-
-Bifrost is now **out of beta**, but still actively evolving.  
-While overall stability has improved, unexpected behavior may still
-occur on some devices.
-
-Also, this fork is maintained by someone who doesn't understand half 
-the changes they make so keep your expectations low and maybe you'll be pleasantly surprised.
-
-Also also, the maintainer of this fork only cares about their own AYN Thor
-so if you're not using that specific device or something similar you're probably better off using the original version.
-
-### **Known issues**
-
-- Random crashes under certain conditions
-- Granting notification permission at launch may cause the LED toggle
-  switch to appear disabled even though animations continue running
-- On the Retroid Pocket Mini, only the left stick turns on in Ambilight mode.
-  This issue can be solved using the custom color sampler mode.
-  (Thanks to r/hupo224 for helping with this issue.)
-
-If you encounter issues, please open a GitHub issue or check the existing ones.
-
-## 🧬 Fork vs Upstream (what’s different?)
-
-This fork contains enhancements that aren’t (yet) in the upstream Pollux-MoonBench/Bifrost main branch.
-
-### Key additions
-
-- **Auto-start on boot** to keep Bifrost running after device reboot.
-- Individual left/right control -- make each side a distinct colour!
-- Profiles can now be assigned to apps, and will automatically activate when the selected app is in the foreground. 
-- **Improved charging indicator**:
-  - Breathing lights while charging
-  - Charging speed indication
-  - Flash notification when charging completes
-- **New CPU temperature LED animation** (colors shift based on thermal readings).
-
-### Project-level differences
-
-- Includes a **`CHANGELOG.md`** to track releases and notable changes.
-- Releases include a published **APK asset** (tagged `v1.0.6`).
-- Updated UI layout and animation smoothing tweaks across several animations.
+---
 
 ## 📜 License
 
 This project is licensed under **GPLv3**.
 
-You are free to use, study, modify, and redistribute the app under the
-terms of the GPLv3 license.\
-This app is provided for free in this repository and **cannot be sold to
-you.** You should never have to pay for Bifrost!
+You are free to use, study, modify, and redistribute the app under the terms of the GPLv3 license.

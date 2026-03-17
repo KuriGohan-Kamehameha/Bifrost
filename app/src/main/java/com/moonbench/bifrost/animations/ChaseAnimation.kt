@@ -58,18 +58,20 @@ class ChaseAnimation(
                 ledTrail.removeAt(ledTrail.size - 1)
             }
 
+            // Precompute brightness for every LED in one pass over the (tiny) trail
+            // instead of calling indexOf(i) for each LED.
+            val ledBrightness = FloatArray(4)
+            ledTrail.forEachIndexed { trailPos, ledIndex ->
+                ledBrightness[ledIndex] = (1f - trailPos.toFloat() / trailLength) * globalScale
+            }
+
             for (i in 0 until 4) {
                 val isRight = i >= 2
                 val baseR = if (isRight) Color.red(currentRightColor) else Color.red(currentColor)
                 val baseG = if (isRight) Color.green(currentRightColor) else Color.green(currentColor)
                 val baseB = if (isRight) Color.blue(currentRightColor) else Color.blue(currentColor)
 
-                val trailIndex = ledTrail.indexOf(i)
-                val brightness = if (trailIndex >= 0) {
-                    (1f - trailIndex.toFloat() / trailLength) * globalScale
-                } else {
-                    0f
-                }
+                val brightness = ledBrightness[i]
 
                 val r = (baseR * brightness).roundToInt().coerceIn(0, 255)
                 val g = (baseG * brightness).roundToInt().coerceIn(0, 255)

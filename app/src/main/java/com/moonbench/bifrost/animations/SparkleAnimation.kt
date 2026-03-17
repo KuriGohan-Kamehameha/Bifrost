@@ -24,7 +24,7 @@ class SparkleAnimation(
     private var currentRightColor: Int = initialRightColor
     private var targetBrightness: Int = 255
     private var lerpStrength: Float = 0.5f
-    private val ledBrightness = mutableListOf(0f, 0f, 0f, 0f)
+    private val ledBrightness = FloatArray(4)  // indexed by LED slot; FloatArray avoids boxing
 
     override fun setTargetColor(color: Int) {
         targetColor = color

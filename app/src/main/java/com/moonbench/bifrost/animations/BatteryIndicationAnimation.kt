@@ -61,6 +61,8 @@ class BatteryIndicatorAnimation(
     private var readyStateLatched = false
     private var isBatteryReceiverRegistered = false
     private val batteryManager by lazy { context.getSystemService(BatteryManager::class.java) }
+    // Reused each frame in calculateReadyBreatheColor to avoid per-tick FloatArray allocation
+    private val readyHsvBuffer = floatArrayOf(READY_HUE_START, READY_SATURATION, READY_VALUE)
 
     @Volatile
     private var isRunning = false
@@ -285,7 +287,8 @@ class BatteryIndicatorAnimation(
         val pulseWave = ((1.0 - cos(breathPhase)) / 2.0).toFloat().coerceIn(0f, 1f)
         val smooth = pulseWave * pulseWave * (3f - 2f * pulseWave)
         val hue = READY_HUE_START + (READY_HUE_END - READY_HUE_START) * smooth
-        return Color.HSVToColor(floatArrayOf(hue, READY_SATURATION, READY_VALUE))
+        readyHsvBuffer[0] = hue
+        return Color.HSVToColor(readyHsvBuffer)
     }
 
     private fun calculateReadySteadyBrightness(baseBrightness: Int): Int {

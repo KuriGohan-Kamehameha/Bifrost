@@ -73,7 +73,7 @@ class LEDService : Service() {
         private const val EXTRA_CPU_WARM_COLOR_OVERRIDE = "cpuWarmColorOverride"
         private const val EXTRA_CPU_HOT_COLOR_OVERRIDE = "cpuHotColorOverride"
         private const val COLOR_OVERRIDE_UNSET = Int.MIN_VALUE
-        var isRunning = false
+        @Volatile var isRunning = false
     }
 
     private var mediaProjection: MediaProjection? = null
@@ -242,7 +242,7 @@ class LEDService : Service() {
 
         lastProjectionResultCode = intent.getIntExtra("resultCode", Activity.RESULT_OK)
         if (intent.hasExtra("data")) {
-            lastProjectionData = intent.getParcelableExtra("data")
+            lastProjectionData = intent.getParcelableExtra("data", Intent::class.java)
         }
 
         currentAnimationType = animationType

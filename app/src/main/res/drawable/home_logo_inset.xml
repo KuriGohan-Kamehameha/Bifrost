@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Circle background so the logo always appears as a round badge -->
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@color/bifrost_surface" />
+        </shape>
+    </item>
+
+    <!-- Inset the foreground content so it doesn't touch the circle edge -->
+    <item
+        android:top="3dp"
+        android:left="3dp"
+        android:right="3dp"
+        android:bottom="3dp">
+        <bitmap
+            android:src="@mipmap/ic_launcher_foreground"
+            android:gravity="center" />
+    </item>
+</layer-list>

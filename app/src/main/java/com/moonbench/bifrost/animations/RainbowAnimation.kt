@@ -18,6 +18,7 @@ class RainbowAnimation(
     private var targetBrightness: Int = 255
     private var speed: Float = 0.5f
     private var hue = 0f
+    private val hsv = floatArrayOf(0f, 1f, 1f)  // reused each frame to avoid per-tick allocation
 
     override fun setTargetColor(color: Int) {
     }
@@ -34,7 +35,7 @@ class RainbowAnimation(
         override fun run() {
             if (!running) return
 
-            val hsv = floatArrayOf(hue, 1f, 1f)
+            hsv[0] = hue
             val color = Color.HSVToColor(hsv)
 
             val baseR = Color.red(color)

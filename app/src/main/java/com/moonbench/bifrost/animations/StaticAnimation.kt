@@ -29,20 +29,35 @@ class StaticAnimation(
 
     private var lerpStrength: Float = 0.5f
 
+    // True while the runnable is posted to the handler; prevents double-posting
+    // and allows setters to restart the loop after it has paused on convergence.
+    private var loopPending = false
+
+    private fun ensureLooping() {
+        if (running && !loopPending) {
+            loopPending = true
+            handler.post(runnable)
+        }
+    }
+
     override fun setTargetColor(color: Int) {
         targetColor = color
+        ensureLooping()
     }
 
     override fun setTargetRightColor(color: Int) {
         targetRightColor = color
+        ensureLooping()
     }
 
     override fun setTargetBrightness(brightness: Int) {
         targetBrightness = brightness.coerceIn(0, 255)
+        ensureLooping()
     }
 
     override fun setLerpStrength(strength: Float) {
         lerpStrength = strength.coerceIn(0f, 1f)
+        ensureLooping()
     }
 
     private val runnable = object : Runnable {
@@ -54,7 +69,8 @@ class StaticAnimation(
             currentRightColor = lerpColor(currentRightColor, targetRightColor, factor)
             currentBrightness = lerpBrightnessInt(currentBrightness, targetBrightness, factor)
 
-            val scale = currentBrightness / 255f
+            // Apply gamma correction consistent with other animations
+            val scale = applyGamma(currentBrightness) / 255f
 
             val lr = (Color.red(currentColor) * scale).roundToInt().coerceIn(0, 255)
             val lg = (Color.green(currentColor) * scale).roundToInt().coerceIn(0, 255)
@@ -71,18 +87,27 @@ class StaticAnimation(
                 leftTop = false, leftBottom = false,
                 rightTop = true, rightBottom = true)
 
-            handler.postDelayed(this, adjustedAnimationDelay(30L, targetBrightness))
+            // Stop looping once fully converged to avoid redundant 30 ms ticks at idle.
+            // Setters will restart the loop when any target changes.
+            if (currentColor == targetColor && currentRightColor == targetRightColor &&
+                    currentBrightness == targetBrightness) {
+                loopPending = false
+            } else {
+                handler.postDelayed(this, adjustedAnimationDelay(30L, targetBrightness))
+            }
         }
     }
 
     override fun start() {
         if (running) return
         running = true
+        loopPending = true
         handler.post(runnable)
     }
 
     override fun stop() {
         running = false
+        loopPending = false
         handler.removeCallbacksAndMessages(null)
         ledController.setLedColor(
             0,
