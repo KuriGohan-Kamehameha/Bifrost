@@ -11,12 +11,14 @@ import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.content.ContextCompat
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.util.UUID
 
 data class PresetVisualSpec(
     val builtInIcon: PresetIcon,
     val customEmoji: String? = null,
-    val customImageFileName: String? = null
+    val customImageFileName: String? = null,
+    val appIconPackageName: String? = null
 )
 
 object PresetVisuals {
@@ -25,7 +27,8 @@ object PresetVisuals {
         return PresetVisualSpec(
             builtInIcon = preset.icon,
             customEmoji = preset.customEmoji,
-            customImageFileName = preset.customImageFileName
+            customImageFileName = preset.customImageFileName,
+            appIconPackageName = preset.appIconPackageName
         )
     }
 
@@ -37,6 +40,7 @@ object PresetVisuals {
         return when {
             !preset.customImageFileName.isNullOrBlank() -> "Uploaded image"
             !preset.customEmoji.isNullOrBlank() -> "Custom emoji"
+            !preset.appIconPackageName.isNullOrBlank() -> "Assigned app icon"
             else -> preset.icon.label
         }
     }
@@ -67,6 +71,20 @@ object PresetVisuals {
             iconView.visibility = android.view.View.GONE
             emojiView.text = emojiValue
             emojiView.visibility = android.view.View.VISIBLE
+            return
+        }
+
+        val appIconDrawable = spec.appIconPackageName
+            ?.takeIf { it.isNotBlank() }
+            ?.let { packageName ->
+                runCatching { context.packageManager.getApplicationIcon(packageName) }.getOrNull()
+            }
+        if (appIconDrawable != null) {
+            emojiView.text = null
+            emojiView.visibility = android.view.View.GONE
+            iconView.visibility = android.view.View.VISIBLE
+            iconView.scaleType = ImageView.ScaleType.FIT_CENTER
+            iconView.setImageDrawable(appIconDrawable)
             return
         }
 
@@ -130,6 +148,32 @@ object PresetImageStorage {
     fun deleteIfExists(context: Context, fileName: String?) {
         if (fileName.isNullOrBlank()) return
         resolveFile(context, fileName).takeIf { it.exists() }?.delete()
+    }
+
+    fun openIconInputStream(context: Context, fileName: String): InputStream? {
+        val file = runCatching { resolveFile(context, fileName) }.getOrNull() ?: return null
+        if (!file.exists()) return null
+        return runCatching { file.inputStream() }.getOrNull()
+    }
+
+    fun importIconFromBytes(context: Context, sourceName: String, bytes: ByteArray): String? {
+        if (bytes.isEmpty() || bytes.size > MAX_IMAGE_BYTES) return null
+
+        val safeExtension = sourceName
+            .substringAfterLast('.', "img")
+            .lowercase()
+            .filter { it.isLetterOrDigit() }
+            .ifBlank { "img" }
+            .take(8)
+
+        val generatedName =
+            "preset_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}.$safeExtension"
+        val targetFile = resolveFile(context, generatedName)
+
+        return runCatching {
+            FileOutputStream(targetFile).use { it.write(bytes) }
+            targetFile.name
+        }.getOrNull()
     }
 
     fun loadBitmap(context: Context, fileName: String, targetSizePx: Int): Bitmap? {
