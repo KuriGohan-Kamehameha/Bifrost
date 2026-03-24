@@ -7,10 +7,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -23,8 +25,12 @@ import android.os.IBinder
 import android.os.Looper
 import android.hardware.display.DisplayManager
 import android.util.DisplayMetrics
+import android.util.Log
 import android.view.Display
 import android.view.WindowManager
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.moonbench.bifrost.MainActivity
 import com.moonbench.bifrost.R
 import com.moonbench.bifrost.animations.AmbiAuroraAnimation
@@ -45,14 +51,15 @@ import com.moonbench.bifrost.animations.StaticAnimation
 import com.moonbench.bifrost.animations.StrobeAnimation
 import com.moonbench.bifrost.tools.LedController
 import com.moonbench.bifrost.tools.PerformanceProfile
-import com.moonbench.bifrost.LedPreset
 import java.util.concurrent.atomic.AtomicBoolean
 
 class LEDService : Service() {
 
     companion object {
+        private const val TAG = "BIBI"
         private const val PREF_KEY_LAST_PRESET = "last_preset_name"
         private const val ACTIVITY_CHECK_INTERVAL_MS = 2000L
+        private const val ACTIVITY_CHECK_INTERVAL_APP_PROFILE_MS = 700L
         private const val TRANSITION_RETRY_DELAY_MS = 200L
         private const val TRANSITION_START_DELAY_MS = 100L
         private const val PROJECTION_RESTART_DELAY_MS = 150L
@@ -62,9 +69,20 @@ class LEDService : Service() {
         const val NOTIFICATION_ID = 4242
         const val ACTION_STOP = "com.moonbench.bifrost.STOP"
         const val ACTION_UPDATE_PARAMS = "com.moonbench.bifrost.UPDATE_PARAMS"
+        const val ACTION_FORCE_APP_PROFILE_RESOLUTION = "com.moonbench.bifrost.FORCE_APP_PROFILE_RESOLUTION"
+        const val ACTION_SUPPLY_PROJECTION = "com.moonbench.bifrost.SUPPLY_PROJECTION"
         const val EXTRA_ALLOW_BACKGROUND_RUN = "allowBackgroundRun"
         const val EXTRA_BATTERY_OVERRIDE_WHEN_PLUGGED = "batteryOverrideWhenPlugged"
         const val EXTRA_PERSISTENT_NOTIFICATION = "persistentNotification"
+        private const val EXTRA_BATTERY_LOW_COLOR_OVERRIDE = "batteryLowColorOverride"
+        private const val EXTRA_BATTERY_MID_COLOR_OVERRIDE = "batteryMidColorOverride"
+        private const val EXTRA_BATTERY_HIGH_COLOR_OVERRIDE = "batteryHighColorOverride"
+        private const val EXTRA_CPU_COOL_COLOR_OVERRIDE = "cpuCoolColorOverride"
+        private const val EXTRA_CPU_WARM_COLOR_OVERRIDE = "cpuWarmColorOverride"
+        private const val EXTRA_CPU_HOT_COLOR_OVERRIDE = "cpuHotColorOverride"
+        private const val COLOR_OVERRIDE_UNSET = Int.MIN_VALUE
+        private const val PROJECTION_PROMPT_CHANNEL_ID = "bifrost_projection_prompt_channel"
+        private const val PROJECTION_PROMPT_NOTIFICATION_ID = 4244
         var isRunning = false
     }
 
@@ -91,6 +109,12 @@ class LEDService : Service() {
     private var currentBreatheWhenCharging: Boolean = false
     private var currentIndicateChargingSpeed: Boolean = false
     private var currentFlashWhenReady: Boolean = false
+    private var currentBatteryLowColorOverride: Int? = null
+    private var currentBatteryMidColorOverride: Int? = null
+    private var currentBatteryHighColorOverride: Int? = null
+    private var currentCpuCoolColorOverride: Int? = null
+    private var currentCpuWarmColorOverride: Int? = null
+    private var currentCpuHotColorOverride: Int? = null
     private var currentBatteryOverrideWhenPlugged: Boolean = false
     private var currentPersistentNotification: Boolean = true
     private var allowBackgroundRun: Boolean = false
@@ -103,6 +127,7 @@ class LEDService : Service() {
     private var pendingTransitionRunnable: Runnable? = null
     private var pendingProjectionRunnable: Runnable? = null
     private var pendingShutdownRunnable: Runnable? = null
+    private var isAppProfileSuppressed: Boolean = false
 
     private val batteryStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -126,10 +151,17 @@ class LEDService : Service() {
             if (!isRunning || isStopping.get()) return
 
             if (!allowBackgroundRun && !isActivityRunning()) {
+                Log.d(TAG, "activityCheckRunnable: activity not running & no background run → stopping")
                 cleanupAndStop()
             } else {
+                Log.d(TAG, "activityCheckRunnable: tick — appProfileEnabled=${appProfileManager.isEnabled}, currentAnimationType=$currentAnimationType, activeAnimationType=$activeAnimationType, currentAnimation=${currentAnimation != null}, isTransitioning=${isTransitioning.get()}")
                 checkAutoProfileSwitch()
-                handler.postDelayed(this, ACTIVITY_CHECK_INTERVAL_MS)
+                val nextDelay = if (appProfileManager.isEnabled) {
+                    ACTIVITY_CHECK_INTERVAL_APP_PROFILE_MS
+                } else {
+                    ACTIVITY_CHECK_INTERVAL_MS
+                }
+                handler.postDelayed(this, nextDelay)
             }
         }
     }
@@ -157,6 +189,19 @@ class LEDService : Service() {
 
         if (intent.action == ACTION_UPDATE_PARAMS) {
             handleUpdateParams(intent)
+            return START_NOT_STICKY
+        }
+
+        if (intent.action == ACTION_FORCE_APP_PROFILE_RESOLUTION) {
+            Log.d(TAG, "onStartCommand: ACTION_FORCE_APP_PROFILE_RESOLUTION, isRunning=$isRunning")
+            if (isRunning) {
+                checkAutoProfileSwitch()
+            }
+            return START_NOT_STICKY
+        }
+
+        if (intent.action == ACTION_SUPPLY_PROJECTION) {
+            handleSupplyProjection(intent)
             return START_NOT_STICKY
         }
 
@@ -205,12 +250,29 @@ class LEDService : Service() {
         currentBreatheWhenCharging = intent.getBooleanExtra("breatheWhenCharging", false)
         currentIndicateChargingSpeed = intent.getBooleanExtra("indicateChargingSpeed", false)
         currentFlashWhenReady = intent.getBooleanExtra("flashWhenReady", false)
+        currentBatteryLowColorOverride = parseOptionalColor(intent, EXTRA_BATTERY_LOW_COLOR_OVERRIDE)
+        currentBatteryMidColorOverride = parseOptionalColor(intent, EXTRA_BATTERY_MID_COLOR_OVERRIDE)
+        currentBatteryHighColorOverride = parseOptionalColor(intent, EXTRA_BATTERY_HIGH_COLOR_OVERRIDE)
+        currentCpuCoolColorOverride = parseOptionalColor(intent, EXTRA_CPU_COOL_COLOR_OVERRIDE)
+        currentCpuWarmColorOverride = parseOptionalColor(intent, EXTRA_CPU_WARM_COLOR_OVERRIDE)
+        currentCpuHotColorOverride = parseOptionalColor(intent, EXTRA_CPU_HOT_COLOR_OVERRIDE)
         currentAmbilightDisplayId = intent.getIntExtra("ambilightDisplayId", Display.DEFAULT_DISPLAY)
 
-        lastProjectionResultCode = intent.getIntExtra("resultCode", Activity.RESULT_OK)
-        if (intent.hasExtra("data")) {
-            lastProjectionData = intent.getParcelableExtra("data")
+        // Protect existing projection data when app-profile mode is active
+        // and the intent was built for a non-MP animation (won't have real MP extras).
+        if (intent.hasExtra("resultCode")) {
+            lastProjectionResultCode = intent.getIntExtra("resultCode", Activity.RESULT_OK)
         }
+        if (intent.hasExtra("data")) {
+            val intentData: Intent? = intent.getParcelableExtra("data")
+            if (intentData != null || !appProfileManager.isEnabled) {
+                lastProjectionData = intentData
+            }
+            Log.d(TAG, "onStartCommand: intentData=${intentData != null}, kept lastProjectionData=${lastProjectionData != null}")
+        } else {
+            Log.d(TAG, "onStartCommand: no 'data' extra in intent, lastProjectionData preserved=${lastProjectionData != null}")
+        }
+        Log.d(TAG, "onStartCommand: lastProjectionResultCode=$lastProjectionResultCode, lastProjectionData=${lastProjectionData != null}")
 
         currentAnimationType = animationType
         currentProfile = profile
@@ -220,16 +282,29 @@ class LEDService : Service() {
         currentSpeed = speed
         currentSmoothness = smoothness
         currentSensitivity = sensitivity
+        isAppProfileSuppressed = false
 
         refreshPluggedStateSnapshot()
 
-        restartAnimationForCurrentState(force = true)
+        if (appProfileManager.isEnabled) {
+            Log.d(TAG, "onStartCommand: app profile enabled, calling checkAutoProfileSwitch()")
+            checkAutoProfileSwitch()
+            if (!isAppProfileSuppressed && currentAnimation == null) {
+                Log.d(TAG, "onStartCommand: no animation running after profile check, starting fallback with force=true")
+                restartAnimationForCurrentState(force = true)
+            }
+        } else {
+            Log.d(TAG, "onStartCommand: app profile disabled, restarting animation with force=true")
+            restartAnimationForCurrentState(force = true)
+        }
 
         return START_NOT_STICKY
     }
 
     private fun handleUpdateParams(intent: Intent) {
         if (!isRunning) return
+        Log.d(TAG, "handleUpdateParams: received update, appProfileEnabled=${appProfileManager.isEnabled}")
+        isAppProfileSuppressed = false
         val animation = currentAnimation
 
         if (intent.hasExtra("animationColor") || intent.hasExtra("animationRightColor")) {
@@ -326,6 +401,53 @@ class LEDService : Service() {
             }
         }
 
+        if (
+            intent.hasExtra(EXTRA_BATTERY_LOW_COLOR_OVERRIDE) ||
+            intent.hasExtra(EXTRA_BATTERY_MID_COLOR_OVERRIDE) ||
+            intent.hasExtra(EXTRA_BATTERY_HIGH_COLOR_OVERRIDE) ||
+            intent.hasExtra(EXTRA_CPU_COOL_COLOR_OVERRIDE) ||
+            intent.hasExtra(EXTRA_CPU_WARM_COLOR_OVERRIDE) ||
+            intent.hasExtra(EXTRA_CPU_HOT_COLOR_OVERRIDE)
+        ) {
+            var paletteChanged = false
+
+            val newBatteryLow = parseOptionalColor(intent, EXTRA_BATTERY_LOW_COLOR_OVERRIDE)
+            val newBatteryMid = parseOptionalColor(intent, EXTRA_BATTERY_MID_COLOR_OVERRIDE)
+            val newBatteryHigh = parseOptionalColor(intent, EXTRA_BATTERY_HIGH_COLOR_OVERRIDE)
+            val newCpuCool = parseOptionalColor(intent, EXTRA_CPU_COOL_COLOR_OVERRIDE)
+            val newCpuWarm = parseOptionalColor(intent, EXTRA_CPU_WARM_COLOR_OVERRIDE)
+            val newCpuHot = parseOptionalColor(intent, EXTRA_CPU_HOT_COLOR_OVERRIDE)
+
+            if (newBatteryLow != currentBatteryLowColorOverride) {
+                currentBatteryLowColorOverride = newBatteryLow
+                paletteChanged = true
+            }
+            if (newBatteryMid != currentBatteryMidColorOverride) {
+                currentBatteryMidColorOverride = newBatteryMid
+                paletteChanged = true
+            }
+            if (newBatteryHigh != currentBatteryHighColorOverride) {
+                currentBatteryHighColorOverride = newBatteryHigh
+                paletteChanged = true
+            }
+            if (newCpuCool != currentCpuCoolColorOverride) {
+                currentCpuCoolColorOverride = newCpuCool
+                paletteChanged = true
+            }
+            if (newCpuWarm != currentCpuWarmColorOverride) {
+                currentCpuWarmColorOverride = newCpuWarm
+                paletteChanged = true
+            }
+            if (newCpuHot != currentCpuHotColorOverride) {
+                currentCpuHotColorOverride = newCpuHot
+                paletteChanged = true
+            }
+
+            if (paletteChanged) {
+                restartAnimationForCurrentState(force = true)
+            }
+        }
+
         if (intent.hasExtra(EXTRA_BATTERY_OVERRIDE_WHEN_PLUGGED)) {
             val newBatteryOverrideWhenPlugged = intent.getBooleanExtra(
                 EXTRA_BATTERY_OVERRIDE_WHEN_PLUGGED,
@@ -352,10 +474,23 @@ class LEDService : Service() {
     }
 
     private fun restartAnimationForCurrentState(force: Boolean = false) {
-        if (!isRunning || isStopping.get()) return
+        if (!isRunning || isStopping.get()) {
+            Log.d(TAG, "restartAnimationForCurrentState: skipping — isRunning=$isRunning, isStopping=${isStopping.get()}")
+            return
+        }
+
+        if (isAppProfileSuppressed && !(currentBatteryOverrideWhenPlugged && isDevicePluggedIn)) {
+            Log.d(TAG, "restartAnimationForCurrentState: app profile suppressed → stopping animation")
+            stopCurrentAnimation()
+            return
+        }
 
         val effectiveType = resolveEffectiveAnimationType()
-        if (!force && effectiveType == activeAnimationType) return
+        Log.d(TAG, "restartAnimationForCurrentState: force=$force, effectiveType=$effectiveType, activeAnimationType=$activeAnimationType")
+        if (!force && effectiveType == activeAnimationType) {
+            Log.d(TAG, "restartAnimationForCurrentState: same type & not forced, skipping")
+            return
+        }
 
         if (isTransitioning.getAndSet(true)) {
             pendingTransitionRunnable?.let(handler::removeCallbacks)
@@ -450,6 +585,7 @@ class LEDService : Service() {
         resultCode: Int,
         data: Intent?
     ) {
+        Log.d(TAG, "processAnimationChange: animationType=$animationType, needsMP=${needsMediaProjection(animationType)}, resultCode=$resultCode, data=${data != null}")
         pendingTransitionRunnable?.let(handler::removeCallbacks)
         pendingTransitionRunnable = null
         pendingProjectionRunnable?.let(handler::removeCallbacks)
@@ -503,6 +639,7 @@ class LEDService : Service() {
     }
 
     private fun stopCurrentAnimation() {
+        Log.d(TAG, "stopCurrentAnimation: currentAnimation=${currentAnimation != null}, activeAnimationType=$activeAnimationType")
         try {
             currentAnimation?.stop()
         } catch (e: Exception) {
@@ -523,25 +660,75 @@ class LEDService : Service() {
     private fun replaceMediaProjection(resultCode: Int, data: Intent) {
         synchronized(mediaProjectionLock) {
             runCatching { mediaProjection?.stop() }
-            mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, data)
+            try {
+                mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, data)
+                Log.d(TAG, "replaceMediaProjection: created new projection, isNull=${mediaProjection == null}")
+            } catch (e: Exception) {
+                Log.e(TAG, "replaceMediaProjection: FAILED to create projection", e)
+                mediaProjection = null
+            }
         }
     }
 
     private fun checkAutoProfileSwitch() {
-        if (!isRunning || isTransitioning.get() || isStopping.get()) return
+        if (!isRunning || isTransitioning.get() || isStopping.get()) {
+            Log.d(TAG, "checkAutoProfileSwitch: skipping — isRunning=$isRunning, isTransitioning=${isTransitioning.get()}, isStopping=${isStopping.get()}")
+            return
+        }
 
-        val preset = appProfileManager.checkForSwitch(this) ?: return
+        val switchResult = appProfileManager.checkForSwitch(this)
+        if (switchResult == null) {
+            Log.d(TAG, "checkAutoProfileSwitch: no switch needed (null result)")
+            return
+        }
+
+        Log.d(TAG, "checkAutoProfileSwitch: switchResult presetName='${switchResult.presetName}', preset animType=${switchResult.preset?.animationType}")
 
         // Keep the UI in sync by tracking which preset is active when auto-switch is enabled.
-        prefs.edit().putString(PREF_KEY_LAST_PRESET, preset.name).apply()
+        prefs.edit().putString(PREF_KEY_LAST_PRESET, switchResult.presetName.orEmpty()).apply()
 
         // While the plugged-in battery override is active, keep tracking foreground-app
         // changes but do not apply the preset switch until the override is lifted.
-        if (currentBatteryOverrideWhenPlugged && isDevicePluggedIn) return
+        if (currentBatteryOverrideWhenPlugged && isDevicePluggedIn) {
+            Log.d(TAG, "checkAutoProfileSwitch: battery override active, NOT applying switch")
+            return
+        }
+
+        val preset = switchResult.preset
+        if (preset == null) {
+            Log.d(TAG, "checkAutoProfileSwitch: preset is null → suppressing animation")
+            isAppProfileSuppressed = true
+            stopCurrentAnimation()
+            return
+        }
 
         val needsMP = needsMediaProjection(preset.animationType)
-        if (needsMP && mediaProjection == null) return
+        val hasProjectionData = lastProjectionResultCode == Activity.RESULT_OK && lastProjectionData != null
+        Log.d(TAG, "checkAutoProfileSwitch: needsMP=$needsMP, hasProjectionData=$hasProjectionData, lastProjectionResultCode=$lastProjectionResultCode, lastProjectionData=${lastProjectionData != null}")
 
+        if (needsMP && !hasProjectionData) {
+            Log.d(TAG, "checkAutoProfileSwitch: needs MP but no projection data → showing prompt")
+            val triggerPackage = appProfileManager.getForegroundPackage(this)
+            if (!triggerPackage.isNullOrBlank() && switchResult.presetName != null) {
+                appProfileManager.setPendingProjectionToken(triggerPackage, switchResult.presetName)
+                if (!appProfileManager.isPendingProjectionNotified()) {
+                    showProjectionPromptNotification()
+                    appProfileManager.markPendingProjectionNotified()
+                }
+            }
+            return
+        }
+
+        // If we successfully apply a preset that needed MP, clear any pending token.
+        if (needsMP) {
+            Log.d(TAG, "checkAutoProfileSwitch: clearing pending projection token (MP preset being applied)")
+            appProfileManager.clearPendingProjectionToken()
+            dismissProjectionPromptNotification()
+        }
+
+        isAppProfileSuppressed = false
+
+        Log.d(TAG, "checkAutoProfileSwitch: APPLYING preset '${switchResult.presetName}' — animationType=${preset.animationType}, color=${preset.color}")
         currentAnimationType = preset.animationType
         currentProfile = preset.performanceProfile
         currentColor = preset.color
@@ -556,7 +743,19 @@ class LEDService : Service() {
         currentBreatheWhenCharging = preset.breatheWhenCharging
         currentIndicateChargingSpeed = preset.indicateChargingSpeed
         currentFlashWhenReady = preset.flashWhenReady
+        currentBatteryLowColorOverride = preset.batteryLowColorOverride
+        currentBatteryMidColorOverride = preset.batteryMidColorOverride
+        currentBatteryHighColorOverride = preset.batteryHighColorOverride
+        currentCpuCoolColorOverride = preset.cpuCoolColorOverride
+        currentCpuWarmColorOverride = preset.cpuWarmColorOverride
+        currentCpuHotColorOverride = preset.cpuHotColorOverride
         restartAnimationForCurrentState(force = true)
+    }
+
+    private fun parseOptionalColor(intent: Intent, key: String): Int? {
+        if (!intent.hasExtra(key)) return null
+        val value = intent.getIntExtra(key, COLOR_OVERRIDE_UNSET)
+        return value.takeUnless { it == COLOR_OVERRIDE_UNSET }
     }
 
     private fun isActivityRunning(): Boolean {
@@ -599,6 +798,7 @@ class LEDService : Service() {
 
     private fun cleanupAndStop() {
         if (isStopping.getAndSet(true)) return
+        Log.d(TAG, "cleanupAndStop: STOPPING SERVICE")
 
         try {
             handler.removeCallbacks(activityCheckRunnable)
@@ -607,6 +807,7 @@ class LEDService : Service() {
             allowBackgroundRun = false
             isTransitioning.set(false)
             activeAnimationType = null
+            isAppProfileSuppressed = false
 
             stopCurrentAnimation()
 
@@ -726,10 +927,12 @@ class LEDService : Service() {
         saturationBoost: Float
     ) {
         try {
+            Log.d(TAG, "startAnimation: type=$type, mediaProjection=${synchronized(mediaProjectionLock) { mediaProjection != null }}")
             val animation = createAnimation(type, color, rightColor, profile, saturationBoost)
             currentAnimation = animation
 
             if (animation == null) {
+                Log.w(TAG, "startAnimation: createAnimation returned null for type=$type")
                 activeAnimationType = null
                 return
             }
@@ -743,11 +946,90 @@ class LEDService : Service() {
             animation.setFlashWhenReady(currentFlashWhenReady)
             animation.start()
             activeAnimationType = type
+            Log.d(TAG, "startAnimation: STARTED type=$type, activeAnimationType=$activeAnimationType")
         } catch (e: Exception) {
+            Log.e(TAG, "startAnimation: EXCEPTION for type=$type", e)
             e.printStackTrace()
             activeAnimationType = null
             cleanupAndStop()
         }
+    }
+
+    private fun handleSupplyProjection(intent: Intent) {
+        Log.d(TAG, "handleSupplyProjection: isRunning=$isRunning, isStopping=${isStopping.get()}")
+        if (!isRunning || isStopping.get()) return
+
+        val resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED)
+        val data: Intent? = intent.getParcelableExtra("data")
+        Log.d(TAG, "handleSupplyProjection: resultCode=$resultCode, data=${data != null}")
+        if (resultCode != Activity.RESULT_OK || data == null) return
+
+        // Only store the projection token; do NOT create the MediaProjection now.
+        // processAnimationChange will create it on-demand the first time an
+        // MP-requiring animation actually starts, avoiding exhausting the
+        // single-use consent token before it is needed.
+        lastProjectionResultCode = resultCode
+        lastProjectionData = data
+        Log.d(TAG, "handleSupplyProjection: stored projection token")
+
+        appProfileManager.clearPendingProjectionToken()
+        dismissProjectionPromptNotification()
+
+        // Force the next periodic check to re-evaluate, so that when the
+        // user navigates back to the mapped app the MP-requiring preset
+        // is actually applied (the dedup cache previously returned null
+        // because the preset name matched even though MP was missing).
+        appProfileManager.forceNextResolution()
+        Log.d(TAG, "handleSupplyProjection: forced next resolution, waiting for user to navigate back to mapped app")
+    }
+
+    private fun showProjectionPromptNotification() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+
+        createProjectionPromptNotificationChannel()
+
+        val openAppIntent = Intent(this, MainActivity::class.java).apply {
+            putExtra(MainActivity.EXTRA_GRANT_PROJECTION_FOR_APP_PROFILE, true)
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            PROJECTION_PROMPT_NOTIFICATION_ID,
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, PROJECTION_PROMPT_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification_small)
+            .setLargeIcon(BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher_foreground))
+            .setContentTitle("Screen capture permission needed")
+            .setContentText("Tap to grant permission so Bifrost can run the assigned animation.")
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+
+        NotificationManagerCompat.from(this).notify(PROJECTION_PROMPT_NOTIFICATION_ID, notification)
+    }
+
+    private fun dismissProjectionPromptNotification() {
+        NotificationManagerCompat.from(this).cancel(PROJECTION_PROMPT_NOTIFICATION_ID)
+    }
+
+    private fun createProjectionPromptNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = getSystemService(NotificationManager::class.java)
+        val channel = NotificationChannel(
+            PROJECTION_PROMPT_CHANNEL_ID,
+            "App profile permission prompt",
+            NotificationManager.IMPORTANCE_HIGH
+        )
+        manager.createNotificationChannel(channel)
     }
 
     private fun needsMediaProjection(type: LedAnimationType): Boolean {
@@ -807,9 +1089,17 @@ class LEDService : Service() {
                 this,
                 currentBreatheWhenCharging,
                 currentIndicateChargingSpeed,
-                currentFlashWhenReady
+                currentFlashWhenReady,
+                currentBatteryLowColorOverride,
+                currentBatteryMidColorOverride,
+                currentBatteryHighColorOverride
             )
-            LedAnimationType.CPU_TEMPERATURE -> CpuTemperatureAnimation(ledController)
+            LedAnimationType.CPU_TEMPERATURE -> CpuTemperatureAnimation(
+                ledController,
+                coolColorOverride = currentCpuCoolColorOverride,
+                warmColorOverride = currentCpuWarmColorOverride,
+                hotColorOverride = currentCpuHotColorOverride
+            )
             LedAnimationType.STATIC -> StaticAnimation(ledController, color, rightColor)
             LedAnimationType.BREATH -> BreathAnimation(ledController, color, rightColor)
             LedAnimationType.RAINBOW -> RainbowAnimation(ledController)
