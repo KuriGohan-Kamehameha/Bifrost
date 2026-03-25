@@ -5,6 +5,7 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.Manifest
 import android.app.ActivityOptions
+import android.content.res.ColorStateList
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -88,6 +89,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var animationSpinner: Spinner
     private lateinit var profileSpinner: Spinner
     private lateinit var presetSpinner: Spinner
+    private lateinit var themeSpinner: Spinner
     private lateinit var savePresetButton: MaterialButton
     private lateinit var modifyPresetButton: MaterialButton
     private lateinit var deletePresetButton: MaterialButton
@@ -115,12 +117,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var appProfileSwitch: SwitchMaterial
     private lateinit var homeAppProfileSwitch: SwitchMaterial
     private lateinit var appProfileDefaultSwitch: SwitchMaterial
+    private lateinit var coloredLogoSwitch: SwitchMaterial
     private lateinit var assignAppButton: MaterialButton
     private lateinit var manageAppsButton: MaterialButton
     private lateinit var settingsOverlay: View
     private lateinit var homeContainer: View
     private lateinit var homeSettingsButton: MaterialButton
     private lateinit var closeSettingsButton: MaterialButton
+    private lateinit var tabUiSettings: MaterialButton
+    private lateinit var tabBehaviorSettings: MaterialButton
+    private lateinit var tabThemesSettings: MaterialButton
     private lateinit var presetCoverFlowScroll: LockableHorizontalScrollView
     private lateinit var presetCoverFlowContainer: LinearLayout
     private lateinit var activePresetInfoCard: MaterialCardView
@@ -129,9 +135,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var activePresetAnimationText: TextView
     private lateinit var activePresetProfileText: TextView
     private lateinit var modeCard: MaterialCardView
+    private lateinit var appProfileCard: MaterialCardView
     private lateinit var colorCard: MaterialCardView
     private lateinit var animationCard: MaterialCardView
     private lateinit var performanceCard: MaterialCardView
+    private lateinit var themesCard: MaterialCardView
+    private lateinit var settingsSystemStatusCard: MaterialCardView
     private lateinit var systemStatusContainer: View
     private lateinit var bifrostLogoView: ImageView
     private lateinit var bifrostTitleText: TextView
@@ -139,6 +148,41 @@ class MainActivity : AppCompatActivity() {
     private var thorAmbilightBottomSwitch: SwitchMaterial? = null
 
     private val prefs by lazy { getSharedPreferences("bifrost_prefs", MODE_PRIVATE) }
+
+    private enum class SettingsTab {
+        UI,
+        BEHAVIOR,
+        THEMES
+    }
+
+    private data class HeaderThemePalette(
+        val introHueStart: Float,
+        val introHueSpan: Float,
+        val introSaturation: Float,
+        val introValue: Float,
+        val settleHueStart: Float,
+        val settleHueSpan: Float,
+        val settleHueWobbleAmplitude: Float,
+        val settleSaturationBase: Float,
+        val settleSaturationWave: Float,
+        val settleValueBase: Float,
+        val settleValueWave: Float,
+        val settleAlphaBase: Int,
+        val settleAlphaWave: Int,
+        val settlePhaseDegrees: Float
+    )
+
+    private data class UiTheme(
+        val id: String,
+        val label: String,
+        val backgroundColor: Int,
+        val cardColor: Int,
+        val surfaceColor: Int,
+        val textColor: Int,
+        val accentColor: Int,
+        val accentLightColor: Int,
+        val headerPalette: HeaderThemePalette
+    )
 
     companion object {
         var mediaProjectionResultCode: Int? = null
@@ -165,6 +209,8 @@ class MainActivity : AppCompatActivity() {
         private const val PREF_THOR_AMBILIGHT_BOTTOM_SCREEN = "thor_ambilight_bottom_screen"
         private const val PREF_BATTERY_OVERRIDE_WHEN_PLUGGED = "battery_override_when_plugged"
         private const val PREF_PERSISTENT_NOTIFICATION = "persistent_notification_enabled"
+        private const val PREF_SELECTED_UI_THEME = "selected_ui_theme"
+        private const val PREF_COLORED_LOGO_ENABLED = "colored_logo_enabled"
         private const val EXTRA_DISPLAY_RELAUNCH_ATTEMPT = "display_relaunch_attempt"
         private const val MAX_DISPLAY_RELAUNCH_ATTEMPTS = 3
         private const val COLOR_OVERRIDE_UNSET = Int.MIN_VALUE
@@ -222,6 +268,8 @@ class MainActivity : AppCompatActivity() {
     private var isCoverFlowTouching: Boolean = false
     private var lastCoverFlowScrollXForSnap: Int = 0
     private var isSettingsOverlayAnimating: Boolean = false
+    private var currentSettingsTab: SettingsTab = SettingsTab.UI
+    private var isColoredLogoEnabled: Boolean = true
     private var isSyncingAppProfileSwitches: Boolean = false
     private var isSyncingAppProfileDefaultSwitch: Boolean = false
     private var pendingPresetArtworkIndex: Int? = null
@@ -235,6 +283,61 @@ class MainActivity : AppCompatActivity() {
     private val colorPickerDialog = ColorPickerDialog()
     private val ragnarokWarningDialog = RagnarokWarningDialog()
     private lateinit var appProfileManager: AppProfileManager
+    private val builtInThemes = listOf(
+        UiTheme(
+            id = "classic",
+            label = "Classic",
+            backgroundColor = Color.parseColor("#0A0E1A"),
+            cardColor = Color.parseColor("#12182B"),
+            surfaceColor = Color.parseColor("#1A2236"),
+            textColor = Color.parseColor("#E8EEFF"),
+            accentColor = Color.parseColor("#6366F1"),
+            accentLightColor = Color.parseColor("#818CF8"),
+            headerPalette = HeaderThemePalette(
+                introHueStart = 0f,
+                introHueSpan = 360f,
+                introSaturation = 0.82f,
+                introValue = 1f,
+                settleHueStart = 18f,
+                settleHueSpan = 300f,
+                settleHueWobbleAmplitude = 10f,
+                settleSaturationBase = 0.28f,
+                settleSaturationWave = 0.14f,
+                settleValueBase = 0.92f,
+                settleValueWave = 0.08f,
+                settleAlphaBase = 224,
+                settleAlphaWave = 31,
+                settlePhaseDegrees = 18f
+            )
+        ),
+        UiTheme(
+            id = "oled_purple",
+            label = "OLED Purple",
+            backgroundColor = Color.parseColor("#000000"),
+            cardColor = Color.parseColor("#000000"),
+            surfaceColor = Color.parseColor("#000000"),
+            textColor = Color.parseColor("#C084FC"),
+            accentColor = Color.parseColor("#A855F7"),
+            accentLightColor = Color.parseColor("#C084FC"),
+            headerPalette = HeaderThemePalette(
+                introHueStart = 264f,
+                introHueSpan = 64f,
+                introSaturation = 0.9f,
+                introValue = 0.98f,
+                settleHueStart = 272f,
+                settleHueSpan = 48f,
+                settleHueWobbleAmplitude = 5f,
+                settleSaturationBase = 0.5f,
+                settleSaturationWave = 0.16f,
+                settleValueBase = 0.76f,
+                settleValueWave = 0.2f,
+                settleAlphaBase = 236,
+                settleAlphaWave = 19,
+                settlePhaseDegrees = 12f
+            )
+        )
+    )
+    private var selectedUiTheme: UiTheme = builtInThemes.first()
 
     private val launchNotificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
@@ -406,6 +509,9 @@ class MainActivity : AppCompatActivity() {
         homeContainer = findViewById(R.id.homeContainer)
         homeSettingsButton = findViewById(R.id.homeSettingsButton)
         closeSettingsButton = findViewById(R.id.closeSettingsButton)
+        tabUiSettings = findViewById(R.id.tabUiSettings)
+        tabBehaviorSettings = findViewById(R.id.tabBehaviorSettings)
+        tabThemesSettings = findViewById(R.id.tabThemesSettings)
         presetCoverFlowScroll = findViewById(R.id.presetCoverFlowScroll)
         presetCoverFlowContainer = findViewById(R.id.presetCoverFlowContainer)
         activePresetInfoCard = findViewById(R.id.activePresetInfoCard)
@@ -421,6 +527,7 @@ class MainActivity : AppCompatActivity() {
         animationSpinner = findViewById(R.id.animationSpinner)
         profileSpinner = findViewById(R.id.profileSpinner)
         presetSpinner = findViewById(R.id.presetSpinner)
+        themeSpinner = findViewById(R.id.themeSpinner)
         savePresetButton = findViewById(R.id.savePresetButton)
         modifyPresetButton = findViewById(R.id.modifyPresetButton)
         deletePresetButton = findViewById(R.id.deletePresetButton)
@@ -446,6 +553,7 @@ class MainActivity : AppCompatActivity() {
         chargingSpeedIndicatorSwitch = findViewById(R.id.chargingSpeedIndicatorSwitch)
         flashWhenReadySwitch = findViewById(R.id.flashWhenReadySwitch)
         appProfileSwitch = findViewById(R.id.appProfileSwitch)
+        coloredLogoSwitch = findViewById(R.id.coloredLogoSwitch)
         homeAppProfileSwitch = findViewById(R.id.homeAppProfileSwitch)
         val appProfileDefaultSwitchId = resources.getIdentifier(
             "appProfileDefaultSwitch",
@@ -457,12 +565,16 @@ class MainActivity : AppCompatActivity() {
         assignAppButton = findViewById(R.id.assignAppButton)
         manageAppsButton = findViewById(R.id.manageAppsButton)
         modeCard = findViewById(R.id.modeCard)
+        appProfileCard = findViewById(R.id.appProfileCard)
         colorCard = findViewById(R.id.colorCard)
         animationCard = findViewById(R.id.animationCard)
         performanceCard = findViewById(R.id.performanceCard)
+        themesCard = findViewById(R.id.themesCard)
+        settingsSystemStatusCard = findViewById(R.id.settingsSystemStatusCard)
         systemStatusContainer = findViewById(R.id.systemStatusContainer)
         bifrostLogoView = findViewById(R.id.homeBifrostLogoView)
         bifrostTitleText = findViewById(R.id.homeBifrostTitleText)
+        bifrostTitleLabel = bifrostTitleText.text.toString()
 
         serviceController = ServiceController(
             activity = this,
@@ -496,6 +608,10 @@ class MainActivity : AppCompatActivity() {
         setupPluggedBatteryOverrideSwitch()
         setupPersistentNotificationSwitch()
         setupThorScreenPreference()
+        setupSettingsTabs()
+        setupThemeFeature()
+        setupColoredLogoSwitch()
+        setupRainbowTitleText()
         setupPresetFeature()
         updateParameterVisibility()
         enableRainbowBackground(LEDService.isRunning)
@@ -575,6 +691,174 @@ class MainActivity : AppCompatActivity() {
                     scheduleCoverFlowSnap()
                 }
             }
+        }
+    }
+
+    private fun setupSettingsTabs() {
+        tabUiSettings.setOnClickListener { setSettingsTab(SettingsTab.UI) }
+        tabBehaviorSettings.setOnClickListener { setSettingsTab(SettingsTab.BEHAVIOR) }
+        tabThemesSettings.setOnClickListener { setSettingsTab(SettingsTab.THEMES) }
+        setSettingsTab(currentSettingsTab)
+    }
+
+    private fun setSettingsTab(tab: SettingsTab) {
+        currentSettingsTab = tab
+        val showingUi = tab == SettingsTab.UI
+        val showingBehavior = tab == SettingsTab.BEHAVIOR
+        val showingThemes = tab == SettingsTab.THEMES
+
+        modeCard.visibility = if (showingUi) View.VISIBLE else View.GONE
+        colorCard.visibility = if (showingUi) View.VISIBLE else View.GONE
+        animationCard.visibility = if (showingUi) View.VISIBLE else View.GONE
+        performanceCard.visibility = if (showingUi) View.VISIBLE else View.GONE
+
+        settingsSystemStatusCard.visibility = if (showingBehavior) View.VISIBLE else View.GONE
+        appProfileCard.visibility = if (showingBehavior) View.VISIBLE else View.GONE
+
+        val thorCard = findViewById<View>(R.id.thorSettingsCard)
+        thorCard?.visibility = if (showingBehavior && DeviceInfo.isAynThor) View.VISIBLE else View.GONE
+
+        themesCard.visibility = if (showingThemes) View.VISIBLE else View.GONE
+
+        updateSettingsTabButtonStyles()
+    }
+
+    private fun updateSettingsTabButtonStyles() {
+        updateSettingsTabButtonState(tabUiSettings, currentSettingsTab == SettingsTab.UI)
+        updateSettingsTabButtonState(tabBehaviorSettings, currentSettingsTab == SettingsTab.BEHAVIOR)
+        updateSettingsTabButtonState(tabThemesSettings, currentSettingsTab == SettingsTab.THEMES)
+    }
+
+    private fun updateSettingsTabButtonState(button: MaterialButton, selected: Boolean) {
+        val selectedTint = ColorStateList.valueOf(selectedUiTheme.accentColor)
+        val unselectedTint = ColorStateList.valueOf(selectedUiTheme.surfaceColor)
+        button.backgroundTintList = if (selected) selectedTint else unselectedTint
+        button.setTextColor(if (selected) Color.WHITE else selectedUiTheme.textColor)
+        button.strokeColor = ColorStateList.valueOf(selectedUiTheme.accentLightColor)
+    }
+
+    private fun setupThemeFeature() {
+        val adapter = ArrayAdapter(this, R.layout.item_spinner_bifrost, builtInThemes.map { it.label })
+        adapter.setDropDownViewResource(R.layout.item_spinner_dropdown_bifrost)
+        themeSpinner.adapter = adapter
+
+        val selectedThemeId = prefs.getString(PREF_SELECTED_UI_THEME, builtInThemes.first().id)
+        val selectedIndex = builtInThemes.indexOfFirst { it.id == selectedThemeId }.takeIf { it >= 0 } ?: 0
+        selectedUiTheme = builtInThemes[selectedIndex]
+        themeSpinner.setSelection(selectedIndex, false)
+        applySelectedTheme(selectedUiTheme, persistSelection = false)
+
+        themeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val theme = builtInThemes.getOrNull(position) ?: return
+                applySelectedTheme(theme, persistSelection = true)
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    private fun applySelectedTheme(theme: UiTheme, persistSelection: Boolean) {
+        selectedUiTheme = theme
+        if (persistSelection) {
+            prefs.edit().putString(PREF_SELECTED_UI_THEME, theme.id).apply()
+        }
+        applyUiTheme(theme)
+    }
+
+    private fun applyUiTheme(theme: UiTheme) {
+        setupStatusBar()
+        findViewById<View>(android.R.id.content)?.setBackgroundColor(theme.backgroundColor)
+        homeContainer.setBackgroundColor(theme.backgroundColor)
+        settingsOverlay.setBackgroundColor(theme.backgroundColor)
+        applyThemeToViewTree(homeContainer, theme)
+        applyThemeToViewTree(settingsOverlay, theme)
+        applyHeaderLogoPreference()
+        updateSettingsTabButtonStyles()
+    }
+
+    private fun applyThemeToViewTree(view: View, theme: UiTheme) {
+        when (view) {
+            is MaterialCardView -> {
+                view.setCardBackgroundColor(theme.cardColor)
+                view.strokeColor = theme.accentColor
+            }
+
+            is MaterialButton -> {
+                view.backgroundTintList = ColorStateList.valueOf(theme.surfaceColor)
+                view.setTextColor(theme.textColor)
+                view.iconTint = ColorStateList.valueOf(theme.textColor)
+                view.strokeColor = ColorStateList.valueOf(theme.accentColor)
+            }
+        }
+
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                applyThemeToViewTree(view.getChildAt(index), theme)
+            }
+        }
+    }
+
+    private fun setupColoredLogoSwitch() {
+        isColoredLogoEnabled = prefs.getBoolean(PREF_COLORED_LOGO_ENABLED, true)
+        coloredLogoSwitch.isChecked = isColoredLogoEnabled
+        applyHeaderLogoPreference()
+
+        coloredLogoSwitch.setOnCheckedChangeListener { _, isChecked ->
+            isColoredLogoEnabled = isChecked
+            prefs.edit().putBoolean(PREF_COLORED_LOGO_ENABLED, isChecked).apply()
+            applyHeaderLogoPreference()
+            if (isChecked) {
+                playBifrostHeaderAnimation()
+            }
+        }
+    }
+
+    private fun setupRainbowTitleText() {
+        if (bifrostTitleLabel.isBlank()) return
+
+        bifrostLogoView.setOnClickListener {
+            if (isColoredLogoEnabled) {
+                playBifrostHeaderAnimation()
+            }
+        }
+        bifrostTitleText.setOnClickListener {
+            if (isColoredLogoEnabled) {
+                playBifrostHeaderAnimation()
+            }
+        }
+
+        if (isColoredLogoEnabled) {
+            playBifrostHeaderAnimation()
+        } else {
+            applyHeaderLogoPreference()
+        }
+    }
+
+    private fun applyHeaderLogoPreference() {
+        if (bifrostTitleLabel.isBlank()) return
+
+        titleIntroAnimator?.cancel()
+        headerSettleAnimator?.cancel()
+        titleIntroAnimator = null
+        headerSettleAnimator = null
+
+        bifrostLogoView.rotation = 0f
+        bifrostLogoView.scaleX = 1f
+        bifrostLogoView.scaleY = 1f
+        bifrostLogoView.translationY = 0f
+        bifrostLogoView.alpha = 1f
+
+        if (isColoredLogoEnabled) {
+            applyWatercolorTitlePhase(
+                bifrostTitleLabel,
+                selectedUiTheme.headerPalette.settlePhaseDegrees
+            )
+            bifrostLogoView.clearColorFilter()
+        } else {
+            bifrostTitleText.text = bifrostTitleLabel
+            bifrostTitleText.setTextColor(selectedUiTheme.textColor)
+            bifrostLogoView.clearColorFilter()
         }
     }
 
@@ -1643,7 +1927,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupStatusBar() {
-        window.statusBarColor = getColor(R.color.bifrost_bg)
+        window.statusBarColor = selectedUiTheme.backgroundColor
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             WindowCompat.getInsetsController(window, window.decorView).apply {
                 isAppearanceLightStatusBars = false
@@ -1713,15 +1997,58 @@ class MainActivity : AppCompatActivity() {
         rainbowDrawable = null
     }
 
+    private fun normalizedCyclePhase(phaseDegrees: Float): Float {
+        return ((phaseDegrees % 360f) + 360f) % 360f / 360f
+    }
+
+    private fun computeIntroThemeColor(index: Int, maxIndex: Int, phaseDegrees: Float): Int {
+        val palette = selectedUiTheme.headerPalette
+        val phase = normalizedCyclePhase(phaseDegrees)
+        val letterProgress = index / maxIndex.toFloat()
+        val hueWindow = palette.introHueSpan * ((phase + letterProgress) % 1f)
+        val hue = (palette.introHueStart + hueWindow) % 360f
+        return Color.HSVToColor(floatArrayOf(hue, palette.introSaturation, palette.introValue))
+    }
+
+    private fun computeSettleThemeColor(index: Int, maxIndex: Int, phaseDegrees: Float): Int {
+        val palette = selectedUiTheme.headerPalette
+        val phase = normalizedCyclePhase(phaseDegrees)
+        val letterProgress = index / maxIndex.toFloat()
+        val hueProgress = (letterProgress + phase) % 1f
+        val hue = (
+            palette.settleHueStart +
+                palette.settleHueSpan * hueProgress +
+                palette.settleHueWobbleAmplitude * sin(letterProgress * PI).toFloat()
+            ) % 360f
+        val saturation = (
+            palette.settleSaturationBase +
+                palette.settleSaturationWave * ((sin(letterProgress * PI * 3.0) + 1.0) / 2.0).toFloat()
+            ).coerceIn(0f, 1f)
+        val value = (
+            palette.settleValueBase +
+                palette.settleValueWave * ((cos(letterProgress * PI * 2.0) + 1.0) / 2.0).toFloat()
+            ).coerceIn(0f, 1f)
+        val alpha = (
+            palette.settleAlphaBase +
+                palette.settleAlphaWave * ((sin(letterProgress * PI * 2.5) + 1.0) / 2.0)
+            ).roundToInt().coerceIn(0, 255)
+        return Color.HSVToColor(alpha, floatArrayOf(hue, saturation, value))
+    }
+
     private fun applyRainbowTitlePhase(text: String, phaseDegrees: Float) {
+        if (!isColoredLogoEnabled) {
+            bifrostTitleText.text = text
+            bifrostTitleText.setTextColor(selectedUiTheme.textColor)
+            return
+        }
+
         val rainbowText = SpannableString(text)
         val maxIndex = (text.length - 1).coerceAtLeast(1)
 
         text.indices.forEach { index ->
             if (text[index].isWhitespace()) return@forEach
 
-            val hue = (phaseDegrees + (360f * index / maxIndex)) % 360f
-            val color = Color.HSVToColor(floatArrayOf(hue, 0.82f, 1f))
+            val color = computeIntroThemeColor(index, maxIndex, phaseDegrees)
             rainbowText.setSpan(
                 ForegroundColorSpan(color),
                 index,
@@ -1733,8 +2060,31 @@ class MainActivity : AppCompatActivity() {
         bifrostTitleText.text = rainbowText
     }
 
+    private fun applyWatercolorTitlePhase(text: String, phaseDegrees: Float) {
+        val watercolorText = SpannableString(text)
+        val maxIndex = (text.length - 1).coerceAtLeast(1)
+
+        text.indices.forEach { index ->
+            if (text[index].isWhitespace()) return@forEach
+
+            val color = computeSettleThemeColor(index, maxIndex, phaseDegrees)
+            watercolorText.setSpan(
+                ForegroundColorSpan(color),
+                index,
+                index + 1,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+
+        bifrostTitleText.text = watercolorText
+    }
+
     private fun playBifrostHeaderAnimation() {
         if (bifrostTitleLabel.isBlank()) return
+        if (!isColoredLogoEnabled) {
+            applyHeaderLogoPreference()
+            return
+        }
 
         titleIntroAnimator?.cancel()
         headerSettleAnimator?.cancel()
@@ -1782,8 +2132,16 @@ class MainActivity : AppCompatActivity() {
     private fun resetBifrostHeaderAnimationState() {
         if (bifrostTitleLabel.isBlank()) return
 
-        bifrostTitleText.text = bifrostTitleLabel
-        bifrostTitleText.setTextColor(ContextCompat.getColor(this, R.color.bifrost_text))
+        if (isColoredLogoEnabled) {
+            applyWatercolorTitlePhase(
+                bifrostTitleLabel,
+                selectedUiTheme.headerPalette.settlePhaseDegrees
+            )
+        } else {
+            bifrostTitleText.text = bifrostTitleLabel
+            bifrostTitleText.setTextColor(selectedUiTheme.textColor)
+        }
+
         bifrostLogoView.rotation = 0f
         bifrostLogoView.scaleX = 1f
         bifrostLogoView.scaleY = 1f
@@ -1807,7 +2165,7 @@ class MainActivity : AppCompatActivity() {
             .setDuration(400L)
             .setInterpolator(DecelerateInterpolator())
             .withEndAction {
-                resetBifrostHeaderAnimationState()
+                applyHeaderLogoPreference()
             }
             .start()
     }
