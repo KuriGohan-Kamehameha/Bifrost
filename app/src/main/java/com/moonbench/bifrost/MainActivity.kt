@@ -85,11 +85,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var autoStartupSwitch: SwitchMaterial
     private lateinit var pluggedBatteryOverrideSwitch: SwitchMaterial
     private lateinit var persistentNotificationSwitch: SwitchMaterial
+    private lateinit var adaptiveBrightnessSwitch: SwitchMaterial
     private lateinit var mediaProjectionManager: MediaProjectionManager
     private lateinit var animationSpinner: Spinner
     private lateinit var profileSpinner: Spinner
     private lateinit var presetSpinner: Spinner
     private lateinit var themeSpinner: Spinner
+    private lateinit var exportThemeButton: MaterialButton
+    private lateinit var importThemeButton: MaterialButton
     private lateinit var savePresetButton: MaterialButton
     private lateinit var modifyPresetButton: MaterialButton
     private lateinit var deletePresetButton: MaterialButton
@@ -209,6 +212,7 @@ class MainActivity : AppCompatActivity() {
         private const val PREF_THOR_AMBILIGHT_BOTTOM_SCREEN = "thor_ambilight_bottom_screen"
         private const val PREF_BATTERY_OVERRIDE_WHEN_PLUGGED = "battery_override_when_plugged"
         private const val PREF_PERSISTENT_NOTIFICATION = "persistent_notification_enabled"
+        private const val PREF_ADAPTIVE_BRIGHTNESS = "adaptive_brightness_enabled"
         private const val PREF_SELECTED_UI_THEME = "selected_ui_theme"
         private const val PREF_COLORED_LOGO_ENABLED = "colored_logo_enabled"
         private const val EXTRA_DISPLAY_RELAUNCH_ATTEMPT = "display_relaunch_attempt"
@@ -253,6 +257,7 @@ class MainActivity : AppCompatActivity() {
     private var selectedFlashWhenReady: Boolean = false
     private var selectedBatteryOverrideWhenPlugged: Boolean = false
     private var selectedPersistentNotification: Boolean = true
+    private var selectedAdaptiveBrightness: Boolean = false
     private var isAwaitingPermissionResult = false
     private var isUpdatingFromPreset = false
     private var isGrantingProjectionForAppProfile = false
@@ -276,6 +281,8 @@ class MainActivity : AppCompatActivity() {
     private var presetArtworkSheetDialog: BottomSheetDialog? = null
     private var appProfileSyncRunnable: Runnable? = null
     private var resumeStateSyncRunnable: Runnable? = null
+    private var pendingBackupExportOptions: BackupArchiveTransfer.CategoryOptions? = null
+    private var pendingBackupImportOptions: BackupArchiveTransfer.CategoryOptions? = null
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var presetController: PresetController
@@ -448,13 +455,29 @@ class MainActivity : AppCompatActivity() {
     private val exportPresetsLauncher =
         registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri: Uri? ->
             if (uri == null) return@registerForActivityResult
-            exportPresetBundle(uri)
+            val options = pendingBackupExportOptions ?: BackupArchiveTransfer.CategoryOptions()
+            pendingBackupExportOptions = null
+            exportPresetBundle(uri, options)
+        }
+
+    private val exportThemeLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
+            if (uri == null) return@registerForActivityResult
+            exportThemeBundle(uri)
         }
 
     private val importPresetsLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
             if (uri == null) return@registerForActivityResult
-            importPresetBundle(uri)
+            val options = pendingBackupImportOptions ?: BackupArchiveTransfer.CategoryOptions()
+            pendingBackupImportOptions = null
+            importPresetBundle(uri, options)
+        }
+
+    private val importThemeLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+            if (uri == null) return@registerForActivityResult
+            importThemeBundle(uri)
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -524,10 +547,13 @@ class MainActivity : AppCompatActivity() {
         autoStartupSwitch = findViewById(R.id.autoStartupSwitch)
         pluggedBatteryOverrideSwitch = findViewById(R.id.pluggedBatteryOverrideSwitch)
         persistentNotificationSwitch = findViewById(R.id.persistentNotificationSwitch)
+        adaptiveBrightnessSwitch = findViewById(R.id.adaptiveBrightnessSwitch)
         animationSpinner = findViewById(R.id.animationSpinner)
         profileSpinner = findViewById(R.id.profileSpinner)
         presetSpinner = findViewById(R.id.presetSpinner)
         themeSpinner = findViewById(R.id.themeSpinner)
+        exportThemeButton = findViewById(R.id.exportThemeButton)
+        importThemeButton = findViewById(R.id.importThemeButton)
         savePresetButton = findViewById(R.id.savePresetButton)
         modifyPresetButton = findViewById(R.id.modifyPresetButton)
         deletePresetButton = findViewById(R.id.deletePresetButton)
@@ -607,6 +633,7 @@ class MainActivity : AppCompatActivity() {
         setupAutoStartupSwitch()
         setupPluggedBatteryOverrideSwitch()
         setupPersistentNotificationSwitch()
+        setupAdaptiveBrightnessSwitch()
         setupThorScreenPreference()
         setupSettingsTabs()
         setupThemeFeature()
@@ -2578,6 +2605,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun setupAdaptiveBrightnessSwitch() {
+        selectedAdaptiveBrightness = prefs.getBoolean(PREF_ADAPTIVE_BRIGHTNESS, false)
+        adaptiveBrightnessSwitch.isChecked = selectedAdaptiveBrightness
+
+        adaptiveBrightnessSwitch.setOnCheckedChangeListener { _, isChecked ->
+            selectedAdaptiveBrightness = isChecked
+            prefs.edit().putBoolean(PREF_ADAPTIVE_BRIGHTNESS, isChecked).apply()
+
+            if (LEDService.isRunning && !serviceController.isServiceTransitioning) {
+                sendLiveUpdateToLedService()
+            }
+        }
+    }
+
     private fun setupThorScreenPreference() {
         val thorCard = findViewById<View>(R.id.thorSettingsCard) ?: return
         if (!DeviceInfo.isAynThor) {
@@ -2942,12 +2983,35 @@ class MainActivity : AppCompatActivity() {
         syncAppProfileDefaultSwitch()
 
         exportPresetsButton.setOnClickListener {
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            exportPresetsLauncher.launch("bifrost_presets_$timestamp.bifrost_preset")
+            showBackupCategoryDialog(
+                title = "BACKUP CATEGORIES",
+                subtitle = "Choose what to include in the backup",
+                confirmLabel = "BACKUP"
+            ) { options ->
+                pendingBackupExportOptions = options
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                exportPresetsLauncher.launch("bifrost_backup_$timestamp.bifrost_backup")
+            }
         }
 
         importPresetsButton.setOnClickListener {
-            importPresetsLauncher.launch(arrayOf("*/*"))
+            showBackupCategoryDialog(
+                title = "RESTORE CATEGORIES",
+                subtitle = "Choose what to restore from archive",
+                confirmLabel = "RESTORE"
+            ) { options ->
+                pendingBackupImportOptions = options
+                importPresetsLauncher.launch(arrayOf("*/*"))
+            }
+        }
+
+        exportThemeButton.setOnClickListener {
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            exportThemeLauncher.launch("bifrost_theme_$timestamp.bifrost_theme")
+        }
+
+        importThemeButton.setOnClickListener {
+            importThemeLauncher.launch(arrayOf("*/*"))
         }
 
         // If the app switching feature is already enabled, start syncing the UI after presets load.
@@ -2956,23 +3020,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun exportPresetBundle(uri: Uri) {
+    private fun exportPresetBundle(uri: Uri, options: BackupArchiveTransfer.CategoryOptions) {
         val result = runCatching {
-            PresetArchiveTransfer.exportToUri(
-                context = this,
-                uri = uri,
-                presets = presetController.getPresets(),
-                mappings = appProfileManager.getMappings()
-            )
+            BackupArchiveTransfer.exportToUri(context = this, uri = uri, options = options)
         }.getOrElse {
-            Toast.makeText(this, "Preset export failed", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Backup export failed", Toast.LENGTH_LONG).show()
             return
         }
 
         if (result.warnings.isEmpty()) {
             Toast.makeText(
                 this,
-                "Exported ${result.presetCount} presets (${result.iconCount} icons)",
+                "Backup saved (${result.preferenceCount} settings, ${result.iconCount} images)",
                 Toast.LENGTH_LONG
             ).show()
             return
@@ -2981,8 +3040,8 @@ class MainActivity : AppCompatActivity() {
         val warningText = result.warnings.joinToString("\n")
         BifrostAlertDialog().show(
             activity = this,
-            title = "EXPORT COMPLETED",
-            subtitle = "Exported ${result.presetCount} presets with ${result.warnings.size} warning(s)",
+            title = "BACKUP COMPLETED",
+            subtitle = "Saved backup with ${result.warnings.size} warning(s)",
             body = warningText,
             positiveLabelResId = R.string.alert_action_ok,
             negativeLabelResId = null,
@@ -2991,15 +3050,64 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun importPresetBundle(uri: Uri) {
-        val result = runCatching {
-            PresetArchiveTransfer.importFromUri(this, uri)
+    private fun importPresetBundle(uri: Uri, options: BackupArchiveTransfer.CategoryOptions) {
+        val backupResult = runCatching {
+            BackupArchiveTransfer.importFromUri(this, uri, options = options)
         }.getOrElse {
             BifrostAlertDialog().show(
                 activity = this,
                 title = "IMPORT FAILED",
                 subtitle = "Selected file could not be imported",
                 body = it.message,
+                positiveLabelResId = R.string.alert_action_ok,
+                negativeLabelResId = null,
+                cancelable = true,
+                onConfirm = {}
+            )
+            return
+        }
+
+        if (backupResult.errors.isEmpty()) {
+            val categorySummary = describeBackupCategories(backupResult.appliedOptions)
+            val warningText = if (backupResult.warnings.isEmpty()) {
+                "Categories: $categorySummary\n\nRestore completed successfully."
+            } else {
+                "Categories: $categorySummary\n\nWarnings:\n${backupResult.warnings.joinToString("\n")}"
+            }
+
+            BifrostAlertDialog().show(
+                activity = this,
+                title = "RESTORE COMPLETED",
+                subtitle = "Restored ${backupResult.preferenceCount} settings and ${backupResult.iconCount} images",
+                body = warningText,
+                positiveLabelResId = R.string.alert_action_ok,
+                negativeLabelResId = null,
+                cancelable = true,
+                onConfirm = {
+                    recreate()
+                }
+            )
+            return
+        }
+
+        // Fallback: allow importing legacy preset bundles through the same picker.
+        val result = runCatching {
+            PresetArchiveTransfer.importFromUri(this, uri)
+        }.getOrElse {
+            val mergedErrorText = buildString {
+                append(backupResult.errors.joinToString("\n"))
+                if (isNotEmpty()) append("\n\n")
+                append("Legacy preset import failed")
+                it.message?.let { message ->
+                    append(": ")
+                    append(message)
+                }
+            }
+            BifrostAlertDialog().show(
+                activity = this,
+                title = "IMPORT FAILED",
+                subtitle = "Selected file is not a valid backup archive",
+                body = mergedErrorText,
                 positiveLabelResId = R.string.alert_action_ok,
                 negativeLabelResId = null,
                 cancelable = true,
@@ -3028,6 +3136,45 @@ class MainActivity : AppCompatActivity() {
                 applyImportedBundle(result, replaceEverything = false)
             }
         )
+    }
+
+    private fun showBackupCategoryDialog(
+        title: String,
+        subtitle: String,
+        confirmLabel: String,
+        onConfirm: (BackupArchiveTransfer.CategoryOptions) -> Unit
+    ) {
+        val labels = arrayOf("Themes", "Profiles", "Images")
+        val checked = booleanArrayOf(true, true, true)
+
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(subtitle)
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton(confirmLabel) { _, _ ->
+                val options = BackupArchiveTransfer.CategoryOptions(
+                    themes = checked[0],
+                    profiles = checked[1],
+                    images = checked[2]
+                )
+                if (!options.hasAtLeastOneCategory()) {
+                    Toast.makeText(this, "Select at least one category", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                onConfirm(options)
+            }
+            .setNegativeButton(R.string.action_cancel, null)
+            .show()
+    }
+
+    private fun describeBackupCategories(options: BackupArchiveTransfer.CategoryOptions): String {
+        val selected = mutableListOf<String>()
+        if (options.themes) selected += "Themes"
+        if (options.profiles) selected += "Profiles"
+        if (options.images) selected += "Images"
+        return if (selected.isEmpty()) "None" else selected.joinToString(" + ")
     }
 
     private fun applyImportedBundle(
@@ -3063,6 +3210,118 @@ class MainActivity : AppCompatActivity() {
         }
 
         showImportReport(result)
+    }
+
+    private fun exportThemeBundle(uri: Uri) {
+        val result = runCatching {
+            ThemeArchiveTransfer.exportToUri(
+                context = this,
+                uri = uri,
+                themeId = selectedUiTheme.id,
+                coloredLogoEnabled = isColoredLogoEnabled
+            )
+        }.getOrElse {
+            Toast.makeText(this, "Theme export failed", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        if (result.warnings.isEmpty()) {
+            Toast.makeText(
+                this,
+                "Theme saved (${selectedUiTheme.label})",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        BifrostAlertDialog().show(
+            activity = this,
+            title = "THEME EXPORT COMPLETED",
+            subtitle = "Saved ${selectedUiTheme.label} with ${result.warnings.size} warning(s)",
+            body = result.warnings.joinToString("\n"),
+            positiveLabelResId = R.string.alert_action_ok,
+            negativeLabelResId = null,
+            cancelable = true,
+            onConfirm = {}
+        )
+    }
+
+    private fun importThemeBundle(uri: Uri) {
+        val result = runCatching {
+            ThemeArchiveTransfer.importFromUri(this, uri)
+        }.getOrElse {
+            BifrostAlertDialog().show(
+                activity = this,
+                title = "THEME IMPORT FAILED",
+                subtitle = "Selected file could not be imported",
+                body = it.message,
+                positiveLabelResId = R.string.alert_action_ok,
+                negativeLabelResId = null,
+                cancelable = true,
+                onConfirm = {}
+            )
+            return
+        }
+
+        val importedTheme = builtInThemes.firstOrNull { it.id == result.themeId }
+        val errors = result.errors.toMutableList()
+        if (importedTheme == null) {
+            errors += if (result.themeId.isNullOrBlank()) {
+                "Theme bundle does not contain a supported theme."
+            } else {
+                "Theme '${result.themeId}' is not available in this build."
+            }
+        }
+
+        if (errors.isNotEmpty()) {
+            BifrostAlertDialog().show(
+                activity = this,
+                title = "THEME IMPORT FAILED",
+                subtitle = "Selected file is not a valid supported theme bundle",
+                body = (errors + result.warnings).joinToString("\n"),
+                positiveLabelResId = R.string.alert_action_ok,
+                negativeLabelResId = null,
+                cancelable = true,
+                onConfirm = {}
+            )
+            return
+        }
+
+        applyImportedTheme(importedTheme!!, result.coloredLogoEnabled)
+
+        val body = if (result.warnings.isEmpty()) {
+            "Theme applied successfully."
+        } else {
+            "Warnings:\n${result.warnings.joinToString("\n")}"
+        }
+
+        BifrostAlertDialog().show(
+            activity = this,
+            title = "THEME IMPORT COMPLETED",
+            subtitle = "Applied ${importedTheme.label}",
+            body = body,
+            positiveLabelResId = R.string.alert_action_ok,
+            negativeLabelResId = null,
+            cancelable = true,
+            onConfirm = {}
+        )
+    }
+
+    private fun applyImportedTheme(theme: UiTheme, coloredLogoEnabled: Boolean) {
+        prefs.edit()
+            .putString(PREF_SELECTED_UI_THEME, theme.id)
+            .putBoolean(PREF_COLORED_LOGO_ENABLED, coloredLogoEnabled)
+            .apply()
+
+        isColoredLogoEnabled = coloredLogoEnabled
+        val themeIndex = builtInThemes.indexOfFirst { it.id == theme.id }.takeIf { it >= 0 } ?: 0
+        themeSpinner.setSelection(themeIndex, false)
+        applySelectedTheme(theme, persistSelection = false)
+        if (coloredLogoSwitch.isChecked != coloredLogoEnabled) {
+            coloredLogoSwitch.isChecked = coloredLogoEnabled
+        } else {
+            applyHeaderLogoPreference()
+        }
     }
 
     private fun showImportReport(result: PresetArchiveTransfer.ImportResult) {
@@ -3328,6 +3587,10 @@ class MainActivity : AppCompatActivity() {
                 LEDService.EXTRA_PERSISTENT_NOTIFICATION,
                 selectedPersistentNotification
             )
+            putExtra(
+                LEDService.EXTRA_ADAPTIVE_BRIGHTNESS,
+                selectedAdaptiveBrightness
+            )
             putExtra("ambilightDisplayId", getAmbilightTargetDisplayId())
             putExtra(
                 LEDService.EXTRA_ALLOW_BACKGROUND_RUN,
@@ -3378,6 +3641,10 @@ class MainActivity : AppCompatActivity() {
             putExtra(
                 LEDService.EXTRA_PERSISTENT_NOTIFICATION,
                 selectedPersistentNotification
+            )
+            putExtra(
+                LEDService.EXTRA_ADAPTIVE_BRIGHTNESS,
+                selectedAdaptiveBrightness
             )
         }
         startService(intent)
