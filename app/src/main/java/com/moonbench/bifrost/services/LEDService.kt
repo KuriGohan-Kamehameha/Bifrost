@@ -134,6 +134,7 @@ class LEDService : Service() {
     private var pendingTransitionRunnable: Runnable? = null
     private var pendingProjectionRunnable: Runnable? = null
     private var pendingShutdownRunnable: Runnable? = null
+    private var pendingFinalizeStopRunnable: Runnable? = null
     private var isAppProfileSuppressed: Boolean = false
 
     /**
@@ -252,6 +253,10 @@ class LEDService : Service() {
             handleSupplyProjection(intent)
             return START_NOT_STICKY
         }
+
+        // A new start intent can arrive while a delayed shutdown is still pending.
+        // Cancel pending teardown so we don't stop immediately after restarting.
+        reviveIfStopping()
 
         allowBackgroundRun = intent.getBooleanExtra(EXTRA_ALLOW_BACKGROUND_RUN, allowBackgroundRun)
         currentBatteryOverrideWhenPlugged = intent.getBooleanExtra(
@@ -859,6 +864,14 @@ class LEDService : Service() {
         pendingProjectionRunnable = null
         pendingShutdownRunnable?.let(handler::removeCallbacks)
         pendingShutdownRunnable = null
+        pendingFinalizeStopRunnable?.let(handler::removeCallbacks)
+        pendingFinalizeStopRunnable = null
+    }
+
+    private fun reviveIfStopping() {
+        if (!isStopping.get()) return
+        clearPendingCallbacks()
+        isStopping.set(false)
     }
 
     private fun cleanupAndStop() {
@@ -885,11 +898,13 @@ class LEDService : Service() {
 
                 try {
                     ledController.setLedColor(0, 0, 0, 0, true, true, true, true)
-                    handler.postDelayed({
+                    pendingFinalizeStopRunnable = Runnable {
                         runCatching { ledController.shutdown() }
                         stopForeground(STOP_FOREGROUND_REMOVE)
                         stopSelf()
-                    }, LED_OFF_SETTLE_DELAY_MS)
+                        pendingFinalizeStopRunnable = null
+                    }
+                    handler.postDelayed(pendingFinalizeStopRunnable!!, LED_OFF_SETTLE_DELAY_MS)
                 } catch (e: Exception) {
                     e.printStackTrace()
                     stopForeground(STOP_FOREGROUND_REMOVE)

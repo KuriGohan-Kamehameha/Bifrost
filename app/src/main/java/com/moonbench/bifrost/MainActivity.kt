@@ -2435,10 +2435,6 @@ class MainActivity : AppCompatActivity() {
             object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                     selectedSpeed = progress / 100f
-                    selectedSmoothness = selectedSpeed
-                    if (fromUser) {
-                        smoothnessSeekBar.progress = progress
-                    }
                     if (LEDService.isRunning && fromUser && !serviceController.isServiceTransitioning && !isUpdatingFromPreset) {
                         sendLiveUpdateToLedService()
                     }
@@ -2456,10 +2452,6 @@ class MainActivity : AppCompatActivity() {
             object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                     selectedSmoothness = progress / 100f
-                    selectedSpeed = selectedSmoothness
-                    if (fromUser) {
-                        speedSeekBar.progress = progress
-                    }
                     if (LEDService.isRunning && fromUser && !serviceController.isServiceTransitioning && !isUpdatingFromPreset) {
                         sendLiveUpdateToLedService()
                     }
@@ -3412,11 +3404,11 @@ class MainActivity : AppCompatActivity() {
             val ignoreletterbox = findViewById<View>(R.id.ignoreletterbox)
             var bothSticksSameColor = findViewById<View>(R.id.bothSticksSameColor)
 
-            speedLabel?.visibility = if (needsSpeed || needsSmoothness) View.VISIBLE else View.GONE
-            speedSeekBar.visibility = if (needsSpeed || needsSmoothness) View.VISIBLE else View.GONE
+            speedLabel?.visibility = if (needsSpeed) View.VISIBLE else View.GONE
+            speedSeekBar.visibility = if (needsSpeed) View.VISIBLE else View.GONE
 
-            smoothnessLabel?.visibility = View.GONE
-            smoothnessSeekBar.visibility = View.GONE
+            smoothnessLabel?.visibility = if (needsSmoothness) View.VISIBLE else View.GONE
+            smoothnessSeekBar.visibility = if (needsSmoothness) View.VISIBLE else View.GONE
 
             sensitivityLabel?.visibility = if (needsSensitivity) View.VISIBLE else View.GONE
             sensitivitySeekBar.visibility = if (needsSensitivity) View.VISIBLE else View.GONE
