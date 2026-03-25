@@ -10,3 +10,4 @@ This document contains instructions for autonomous coding agents.
   a. do not pollute or deface upstream repo
   b. be considerate when submitting changes and ensure there are minimal conflicts
   c. ensure that material specific to this fork (like readme differences and identifiers) are not submitted upstream
+7. theme settings that are user-facing, especially selected theme and coloured-logo state, must remain transferable independently of full backups so theme iteration does not require whole-app restore flows
