@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.3-beta] - 2026-04-10
+
+### Added
+- Adaptive LED brightness: LED output scales 25–100% with screen brightness via a ContentObserver on `Settings.System.SCREEN_BRIGHTNESS`; toggle in Behaviour settings tab, preference persisted.
+- Theme import/export: export/import the full theme bundle (JSON, schema `bifrost_theme_bundle v1`) from the Themes tab; mirrors the preset backup/restore UX.
+- Tabbed settings panel: settings reorganized into tabs (Behaviour, Themes, About) for easier navigation.
+- OLED Purple theme preset.
+- Watercolor logo variant; toggle in settings to switch between logos.
+
+### Changed
+- LEDService: added `effectiveBrightness()` helper and `mountScreenBrightnessObserver` / `unmount`; adaptive-brightness extra propagated through `createLedServiceIntent()` and `sendLiveUpdateToLedService()`.
+- `ThemeArchiveTransfer` handles JSON bundle serialization/deserialization for theme export/import.
+- `BackupArchiveTransfer` refactored alongside `ThemeArchiveTransfer` for consistency.
+
 ## [1.1.0] - 2026-03-17
 This release consolidates several enhancements and new features added after 1.0.4. It focuses on preset management, app-profile (per-app) behavior, new and customizable animations, export/import of presets, and several UX and stability improvements.
 
