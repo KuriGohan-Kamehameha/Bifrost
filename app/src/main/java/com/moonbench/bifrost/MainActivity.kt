@@ -67,6 +67,7 @@ import com.moonbench.bifrost.tools.DeviceInfo
 import com.moonbench.bifrost.tools.PerformanceProfile
 import com.moonbench.bifrost.ui.AnimatedRainbowDrawable
 import com.moonbench.bifrost.ui.BifrostAlertDialog
+import com.woheller69.freedroidwarn.FreeDroidWarn
 import com.moonbench.bifrost.ui.ColorPickerDialog
 import com.moonbench.bifrost.ui.LockableHorizontalScrollView
 import com.moonbench.bifrost.ui.RagnarokWarningDialog
@@ -482,6 +483,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        FreeDroidWarn.showWarningOnUpgrade(this, BuildConfig.VERSION_CODE)
         setContentView(R.layout.activity_main)
 
         setupStatusBar()
