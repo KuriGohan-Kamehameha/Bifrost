@@ -51,6 +51,8 @@ import com.moonbench.bifrost.animations.RaveAnimation
 import com.moonbench.bifrost.animations.SparkleAnimation
 import com.moonbench.bifrost.animations.StaticAnimation
 import com.moonbench.bifrost.animations.StrobeAnimation
+import com.moonbench.bifrost.external.ExternalOverrideState
+import com.moonbench.bifrost.external.Terminator
 import com.moonbench.bifrost.tools.LedController
 import com.moonbench.bifrost.tools.PerformanceProfile
 import java.util.concurrent.atomic.AtomicBoolean
@@ -73,10 +75,28 @@ class LEDService : Service() {
         const val ACTION_UPDATE_PARAMS = "com.moonbench.bifrost.UPDATE_PARAMS"
         const val ACTION_FORCE_APP_PROFILE_RESOLUTION = "com.moonbench.bifrost.FORCE_APP_PROFILE_RESOLUTION"
         const val ACTION_SUPPLY_PROJECTION = "com.moonbench.bifrost.SUPPLY_PROJECTION"
+        const val ACTION_EXTERNAL_DISPLAY = "com.moonbench.bifrost.EXTERNAL_DISPLAY"
+        const val ACTION_EXTERNAL_CLEAR = "com.moonbench.bifrost.EXTERNAL_CLEAR"
         const val EXTRA_ALLOW_BACKGROUND_RUN = "allowBackgroundRun"
         const val EXTRA_BATTERY_OVERRIDE_WHEN_PLUGGED = "batteryOverrideWhenPlugged"
         const val EXTRA_PERSISTENT_NOTIFICATION = "persistentNotification"
         const val EXTRA_ADAPTIVE_BRIGHTNESS = "adaptiveBrightness"
+
+        const val EXTRA_EXTERNAL_CALLER_PACKAGE = "external.callerPackage"
+        const val EXTRA_EXTERNAL_EFFECT = "external.effect"
+        const val EXTRA_EXTERNAL_COLOR = "external.color"
+        const val EXTRA_EXTERNAL_COLOR_RIGHT = "external.colorRight"
+        const val EXTRA_EXTERNAL_INTENSITY = "external.intensity"
+        const val EXTRA_EXTERNAL_SPEED = "external.speed"
+        const val EXTRA_EXTERNAL_SMOOTHNESS = "external.smoothness"
+        const val EXTRA_EXTERNAL_SENSITIVITY = "external.sensitivity"
+        const val EXTRA_EXTERNAL_PRIORITY = "external.priority"
+        const val EXTRA_EXTERNAL_TERMINATOR = "external.terminator"
+        const val EXTRA_EXTERNAL_DURATION_MS = "external.durationMs"
+
+        const val TERMINATOR_DURATION = "DURATION"
+        const val TERMINATOR_NEXT_COMMAND = "NEXT_COMMAND"
+        const val TERMINATOR_EXPLICIT_CLEAR = "EXPLICIT_CLEAR"
 
         /** Minimum LED scale applied when screen brightness is at its lowest (0–255 → 0.25). */
         private const val ADAPTIVE_BRIGHTNESS_MIN_SCALE = 0.25f
@@ -135,6 +155,21 @@ class LEDService : Service() {
     private var pendingProjectionRunnable: Runnable? = null
     private var pendingShutdownRunnable: Runnable? = null
     private var isAppProfileSuppressed: Boolean = false
+
+    private var activeExternalOverride: ExternalOverrideState? = null
+    private var externalExpiryRunnable: Runnable? = null
+    private var savedStateBeforeExternalOverride: ExternalOverrideSnapshot? = null
+
+    private data class ExternalOverrideSnapshot(
+        val animationType: LedAnimationType,
+        val color: Int,
+        val rightColor: Int,
+        val brightness: Int,
+        val speed: Float,
+        val smoothness: Float,
+        val sensitivity: Float,
+        val isAppProfileSuppressed: Boolean,
+    )
 
     /**
      * Maps the current system screen brightness (0–255) to an LED brightness multiplier.
@@ -250,6 +285,16 @@ class LEDService : Service() {
 
         if (intent.action == ACTION_SUPPLY_PROJECTION) {
             handleSupplyProjection(intent)
+            return START_NOT_STICKY
+        }
+
+        if (intent.action == ACTION_EXTERNAL_DISPLAY) {
+            handleExternalDisplay(intent)
+            return START_NOT_STICKY
+        }
+
+        if (intent.action == ACTION_EXTERNAL_CLEAR) {
+            handleExternalClear(intent.getStringExtra(EXTRA_EXTERNAL_CALLER_PACKAGE))
             return START_NOT_STICKY
         }
 
@@ -740,6 +785,11 @@ class LEDService : Service() {
             return
         }
 
+        if (activeExternalOverride != null) {
+            Log.d(TAG, "checkAutoProfileSwitch: external override active, skipping")
+            return
+        }
+
         val switchResult = appProfileManager.checkForSwitch(this)
         if (switchResult == null) {
             Log.d(TAG, "checkAutoProfileSwitch: no switch needed (null result)")
@@ -859,6 +909,8 @@ class LEDService : Service() {
         pendingProjectionRunnable = null
         pendingShutdownRunnable?.let(handler::removeCallbacks)
         pendingShutdownRunnable = null
+        externalExpiryRunnable?.let(handler::removeCallbacks)
+        externalExpiryRunnable = null
     }
 
     private fun cleanupAndStop() {
@@ -873,6 +925,8 @@ class LEDService : Service() {
             isTransitioning.set(false)
             activeAnimationType = null
             isAppProfileSuppressed = false
+            activeExternalOverride = null
+            savedStateBeforeExternalOverride = null
 
             stopCurrentAnimation()
 
@@ -1046,6 +1100,130 @@ class LEDService : Service() {
         // because the preset name matched even though MP was missing).
         appProfileManager.forceNextResolution()
         Log.d(TAG, "handleSupplyProjection: forced next resolution, waiting for user to navigate back to mapped app")
+    }
+
+    private fun handleExternalDisplay(intent: Intent) {
+        if (!isRunning || isStopping.get()) return
+
+        val callerPkg = intent.getStringExtra(EXTRA_EXTERNAL_CALLER_PACKAGE) ?: return
+        val effectName = intent.getStringExtra(EXTRA_EXTERNAL_EFFECT) ?: return
+        val effect = runCatching { LedAnimationType.valueOf(effectName) }.getOrNull() ?: return
+
+        val newPriority = intent.getIntExtra(EXTRA_EXTERNAL_PRIORITY, 50)
+        val current = activeExternalOverride
+        if (current != null && current.callerPackage != callerPkg && current.priority > newPriority) {
+            Log.d(TAG, "handleExternalDisplay: preempted — existing override from ${current.callerPackage} priority ${current.priority} > $newPriority from $callerPkg")
+            return
+        }
+
+        val color = intent.getIntExtra(EXTRA_EXTERNAL_COLOR, currentColor)
+        val rightColor = intent.getIntExtra(EXTRA_EXTERNAL_COLOR_RIGHT, color)
+        val intensity = intent.getIntExtra(EXTRA_EXTERNAL_INTENSITY, currentBrightness).coerceIn(0, 255)
+        val speed = intent.getFloatExtra(EXTRA_EXTERNAL_SPEED, currentSpeed).coerceIn(0f, 1f)
+        val smoothness = intent.getFloatExtra(EXTRA_EXTERNAL_SMOOTHNESS, currentSmoothness).coerceIn(0f, 1f)
+        val sensitivity = intent.getFloatExtra(EXTRA_EXTERNAL_SENSITIVITY, currentSensitivity).coerceIn(0f, 1f)
+
+        val terminator: Terminator = when (intent.getStringExtra(EXTRA_EXTERNAL_TERMINATOR)) {
+            TERMINATOR_DURATION -> Terminator.Duration(
+                intent.getLongExtra(EXTRA_EXTERNAL_DURATION_MS, 0L)
+            )
+            TERMINATOR_EXPLICIT_CLEAR -> Terminator.UntilExplicitClear
+            else -> Terminator.UntilNextCommand
+        }
+
+        // Snapshot the pre-override state only on the first transition in —
+        // re-commands from the same or higher-priority caller replay onto the
+        // already-captured snapshot.
+        if (current == null) {
+            savedStateBeforeExternalOverride = ExternalOverrideSnapshot(
+                animationType = currentAnimationType,
+                color = currentColor,
+                rightColor = currentRightColor,
+                brightness = currentBrightness,
+                speed = currentSpeed,
+                smoothness = currentSmoothness,
+                sensitivity = currentSensitivity,
+                isAppProfileSuppressed = isAppProfileSuppressed,
+            )
+        }
+
+        activeExternalOverride = ExternalOverrideState(
+            callerPackage = callerPkg,
+            effect = effect,
+            color = color,
+            colorRight = rightColor,
+            intensity = intensity,
+            speed = speed,
+            smoothness = smoothness,
+            sensitivity = sensitivity,
+            terminator = terminator,
+            priority = newPriority,
+            startedAtMs = System.currentTimeMillis(),
+        )
+
+        currentAnimationType = effect
+        currentColor = color
+        currentRightColor = rightColor
+        currentBrightness = intensity
+        currentSpeed = speed
+        currentSmoothness = smoothness
+        currentSensitivity = sensitivity
+        isAppProfileSuppressed = false
+
+        externalExpiryRunnable?.let(handler::removeCallbacks)
+        externalExpiryRunnable = null
+        if (terminator is Terminator.Duration) {
+            val expiry = Runnable {
+                externalExpiryRunnable = null
+                revertExternalOverride()
+            }
+            externalExpiryRunnable = expiry
+            handler.postDelayed(expiry, terminator.millis)
+        }
+
+        restartAnimationForCurrentState(force = true)
+    }
+
+    private fun handleExternalClear(callerPkg: String?) {
+        val current = activeExternalOverride ?: return
+        if (callerPkg != null && current.callerPackage != callerPkg) {
+            Log.d(TAG, "handleExternalClear: ignoring — override owned by ${current.callerPackage}, clear from $callerPkg")
+            return
+        }
+        revertExternalOverride()
+    }
+
+    private fun revertExternalOverride() {
+        externalExpiryRunnable?.let(handler::removeCallbacks)
+        externalExpiryRunnable = null
+        val snapshot = savedStateBeforeExternalOverride
+        activeExternalOverride = null
+        savedStateBeforeExternalOverride = null
+
+        if (snapshot != null) {
+            currentAnimationType = snapshot.animationType
+            currentColor = snapshot.color
+            currentRightColor = snapshot.rightColor
+            currentBrightness = snapshot.brightness
+            currentSpeed = snapshot.speed
+            currentSmoothness = snapshot.smoothness
+            currentSensitivity = snapshot.sensitivity
+            isAppProfileSuppressed = snapshot.isAppProfileSuppressed
+        }
+
+        if (!isRunning || isStopping.get()) return
+
+        // If app-profile mode is active, let it re-resolve cleanly rather than
+        // snapping back to whatever was painted when the override started.
+        if (appProfileManager.isEnabled) {
+            appProfileManager.forceNextResolution()
+            checkAutoProfileSwitch()
+            if (!isAppProfileSuppressed && currentAnimation == null) {
+                restartAnimationForCurrentState(force = true)
+            }
+        } else {
+            restartAnimationForCurrentState(force = true)
+        }
     }
 
     private fun showProjectionPromptNotification() {

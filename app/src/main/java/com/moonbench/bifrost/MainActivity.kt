@@ -59,6 +59,7 @@ import com.google.android.material.switchmaterial.SwitchMaterial
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.moonbench.bifrost.animations.LedAnimationType
+import com.moonbench.bifrost.external.ExternalApiGate
 import com.moonbench.bifrost.services.AppProfileManager
 import com.moonbench.bifrost.services.HeimdallStartupManager
 import com.moonbench.bifrost.services.LEDService
@@ -87,6 +88,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pluggedBatteryOverrideSwitch: SwitchMaterial
     private lateinit var persistentNotificationSwitch: SwitchMaterial
     private lateinit var adaptiveBrightnessSwitch: SwitchMaterial
+    private lateinit var externalApiSwitch: SwitchMaterial
     private lateinit var mediaProjectionManager: MediaProjectionManager
     private lateinit var animationSpinner: Spinner
     private lateinit var profileSpinner: Spinner
@@ -550,6 +552,7 @@ class MainActivity : AppCompatActivity() {
         pluggedBatteryOverrideSwitch = findViewById(R.id.pluggedBatteryOverrideSwitch)
         persistentNotificationSwitch = findViewById(R.id.persistentNotificationSwitch)
         adaptiveBrightnessSwitch = findViewById(R.id.adaptiveBrightnessSwitch)
+        externalApiSwitch = findViewById(R.id.externalApiSwitch)
         animationSpinner = findViewById(R.id.animationSpinner)
         profileSpinner = findViewById(R.id.profileSpinner)
         presetSpinner = findViewById(R.id.presetSpinner)
@@ -636,6 +639,7 @@ class MainActivity : AppCompatActivity() {
         setupPluggedBatteryOverrideSwitch()
         setupPersistentNotificationSwitch()
         setupAdaptiveBrightnessSwitch()
+        setupExternalApiSwitch()
         setupThorScreenPreference()
         setupSettingsTabs()
         setupThemeFeature()
@@ -1978,6 +1982,9 @@ class MainActivity : AppCompatActivity() {
                 enableRainbowBackground(LEDService.isRunning)
             }
 
+            if (::presetController.isInitialized) {
+                presetController.reloadFromPrefs()
+            }
             refreshCoverFlowFromPresets()
         }
         mainHandler.postDelayed(resumeStateSyncRunnable!!, 100)
@@ -2617,6 +2624,22 @@ class MainActivity : AppCompatActivity() {
 
             if (LEDService.isRunning && !serviceController.isServiceTransitioning) {
                 sendLiveUpdateToLedService()
+            }
+        }
+    }
+
+    private fun setupExternalApiSwitch() {
+        externalApiSwitch.isChecked = ExternalApiGate.isMasterEnabled(prefs)
+        externalApiSwitch.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(ExternalApiGate.PREF_ENABLED, isChecked).apply()
+            // Enabling requires the service to survive activity close, so next
+            // start picks up the OR'd allowBackgroundRun. If running, restart
+            // so the new flag takes effect without waiting for the user to
+            // stop/start manually.
+            if (isChecked && LEDService.isRunning && !serviceController.isServiceTransitioning) {
+                serviceController.restartDebounced(needsMediaProjectionCheck = false) {
+                    createLedServiceIntent()
+                }
             }
         }
     }
@@ -3596,7 +3619,8 @@ class MainActivity : AppCompatActivity() {
             putExtra("ambilightDisplayId", getAmbilightTargetDisplayId())
             putExtra(
                 LEDService.EXTRA_ALLOW_BACKGROUND_RUN,
-                HeimdallStartupManager.isAutoStartEnabled(prefs)
+                HeimdallStartupManager.isAutoStartEnabled(prefs) ||
+                    ExternalApiGate.isMasterEnabled(prefs)
             )
             // When app profile mode is active, always include MP data if available,
             // regardless of the UI-selected animation type.  The actual animation is
