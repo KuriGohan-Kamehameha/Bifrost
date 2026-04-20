@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0-beta] - 2026-04-19
+
+### Added
+- **External-app IPC API** — third-party apps can now control Bifrost LEDs via ordered broadcasts. Features:
+  - `ACTION_DISPLAY` — live LED override with configurable effect, colour (left/right independently), intensity, speed, smoothness, priority, and auto-expiring duration terminator
+  - `ACTION_CLEAR` — end your app's active override immediately
+  - `ACTION_INSTALL_PROFILE` / `ACTION_UNINSTALL_PROFILE` — install and remove named presets scoped to the caller package
+  - Priority arbitration between multiple callers (0–100 scale; same-app commands always win)
+  - Snapshot/revert lifecycle: Bifrost saves its state before an override and restores it automatically when the override ends
+  - Per-UID token-bucket rate limiter (8 burst, 4 sustained/s)
+  - Caller verified via `Binder.getCallingUid()` + `PackageManager.getPackagesForUid()` — immune to intent spoofing
+  - All commands silently dropped when service is not running (Android 12+ foreground-service-start restrictions respected)
+  - Custom permission `com.moonbench.bifrost.permission.CONTROL_LEDS` at `normal` protection level
+- **"Allow third-party LED control"** toggle in Behaviour settings; enabling it also sets `allowBackgroundRun` so the service survives activity close
+- `PackageRemovedReceiver` — auto-cleans externally installed presets and app-profile mappings when the owning app is uninstalled
+- `LedPreset.ownerPackage` field for tracking which external package installed a preset; round-tripped through JSON
+- `AppProfileManager.removeMappingsReferencing()` — bulk mapping cleanup used by `PackageRemovedReceiver`
+- `PresetController.reloadFromPrefs()` — called on `MainActivity.onResume` so presets installed while the UI is backgrounded appear immediately on next open
+- `INTEGRATING.md` — comprehensive developer integration guide with Kotlin and Java examples, recipes, a complete drop-in wrapper class, and an effect reference table
+
+### Changed
+- `checkAutoProfileSwitch` returns early while an external override is active, preventing profile-switching from interrupting the caller's effect
+- `clearPendingCallbacks` and `cleanupAndStop` now also cancel the external expiry runnable and null out the override state
+
 ## [1.1.3-beta] - 2026-04-10
 
 ### Added
