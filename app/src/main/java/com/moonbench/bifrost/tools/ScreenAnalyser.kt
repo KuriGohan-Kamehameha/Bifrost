@@ -127,9 +127,13 @@ class ScreenAnalyzer(
         // Detach the frame listener before releasing the reader so an in-flight
         // capture callback on the handler thread can't touch a closed reader.
         runCatching { imageReader?.setOnImageAvailableListener(null, null) }
-        captureSurface?.let { mediaProjection?.display?.detach(it) }
+        // Revocation can invalidate the display before its callback reaches us.
+        // A failed detach must not strand the reader or either animation worker.
+        runCatching { captureSurface?.let { mediaProjection?.display?.detach(it) } }
+            .onFailure { android.util.Log.w("ScreenAnalyser", "Capture surface already unavailable", it) }
         captureSurface = null
-        imageReader?.close()
+        runCatching { imageReader?.close() }
+            .onFailure { android.util.Log.w("ScreenAnalyser", "Capture reader cleanup failed", it) }
         imageReader = null
         handlerThread?.quitSafely()
         handlerThread = null
