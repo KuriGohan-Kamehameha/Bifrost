@@ -25,13 +25,13 @@ object PluginPrefs {
     const val FALLOUT_PLUGIN_ID = "fallout4-pipboy"
 
     /**
-     * Default catalogue. Served from the upstream Bifrost repo's dedicated
+     * Default catalogue. Served from the maintained Bifrost fork's dedicated
      * `plugin-catalog` branch (content-only, gh-pages style — permanent, so the
      * URL never breaks when feature branches merge). Overridable in the plugin
      * store UI for forks / local testing.
      */
     const val DEFAULT_CATALOG_URL =
-        "https://raw.githubusercontent.com/Pollux-MoonBench/Bifrost/plugin-catalog/catalog.json"
+        "https://raw.githubusercontent.com/KuriGohan-Kamehameha/Bifrost/plugin-catalog/catalog.json"
 
     fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

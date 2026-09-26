@@ -1,5 +1,17 @@
 # Bifrost -- LED Controller for the AYN Thor
 
+## Continued maintenance
+
+This is the continued-maintenance fork of **[Pollux / MoonBench's Bifrost](https://github.com/Pollux-MoonBench/Bifrost)**, maintained by **KuriGohan-Kamehameha** following Pollux's departure from the project. Thank you, Pollux, for creating Bifrost and sharing it under GPLv3.
+
+The source incorporates Pollux's final published stable release, **[1.3.1](https://github.com/Pollux-MoonBench/Bifrost/releases/tag/1.3.1)**, together with the existing fork history. Future development and issue reports belong here:
+
+- [Releases and downloads](https://github.com/KuriGohan-Kamehameha/Bifrost/releases)
+- [Report an issue](https://github.com/KuriGohan-Kamehameha/Bifrost/issues)
+- [Build, signing, and maintenance guide](MAINTAINING.md)
+
+Importing the source does not publish a new APK. Check each release's notes and channel before installing; older fork beta releases are not builds of this imported source. An APK can update an existing installation only when its signing certificate is compatible. Export your settings/presets before switching distributions; changing the Obtainium URL alone cannot resolve a signing mismatch.
+
 Bifrost is a custom LED controller for the **AYN Thor** handheld (and might work for other handhelds).  
 It provides a collection of LED animations that can run in the background, including:
 
@@ -146,7 +158,7 @@ Bifrost can be installed in two different ways:
 
 ## Method 1 — Manual APK install
 
-1. Download the latest **APK** from the GitHub releases page.
+1. Download an **APK** from [this fork’s releases](https://github.com/KuriGohan-Kamehameha/Bifrost/releases), checking its version, channel, and signing notes.
 2. Open your **Downloads** folder.
 3. Tap the APK file to start the installation.
 4. If Android asks to allow installation from **unknown sources**, accept the permission.
@@ -162,7 +174,7 @@ If you use **Obtainium**, you can automatically receive updates:
    https://github.com/ImranR98/Obtainium
 
 2. Add a new app using this source:
-   https://github.com/Pollux-MoonBench/Bifrost/releases/
+   https://github.com/KuriGohan-Kamehameha/Bifrost/releases/
 
 3. Follow the Obtainium installation process.
 
@@ -222,9 +234,9 @@ https://github.com/KuriGohan-Kamehameha
 
 ---
 
-# ☕ Support the Project
+# ☕ Thank the Original Creator
 
-If you enjoy Bifrost and want to support development, you can **buy me a coffee** here:
+Pollux / MoonBench created Bifrost. The following donation link supports **Pollux**, not maintenance of this fork:
 
 👉 https://ko-fi.com/pollux_moonbench
 
@@ -238,4 +250,4 @@ This project is licensed under **GPLv3**.
 
 You are free to use, study, modify, and redistribute the app under the terms of the GPLv3 license.
 
-This app is provided for free in this repository and **cannot be sold to you.**
+The app is available free of charge here. Redistribution, including commercial redistribution, is governed by the GPLv3 license; no additional restriction is imposed by this README.
