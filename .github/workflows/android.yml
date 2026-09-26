@@ -25,7 +25,21 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d # v4
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
       - name: Install Android SDK packages
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
       - name: Build and run unit tests
         run: ./gradlew --no-daemon --console=plain testDebugUnitTest assembleDebug assembleRelease
+      - name: Collect lint findings
+        id: lint
+        continue-on-error: true
+        run: ./gradlew --no-daemon --console=plain lintDebug
+      - name: Save test and lint reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-check-reports
+          path: |
+            app/build/reports/
+            app/build/test-results/
+          retention-days: 14

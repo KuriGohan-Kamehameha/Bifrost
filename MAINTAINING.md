@@ -24,7 +24,9 @@ Gradle wrapper. Set `ANDROID_HOME` or an ignored `local.properties` with `sdk.di
 ```
 
 The Android checks workflow runs unit tests and both builds on pull requests and
-pushes to main. It does not publish APKs or use release signing credentials.
+pushes to main. Lint runs as an advisory check and its report is retained with
+the test reports; inspect findings before a release. The workflow does not
+publish APKs or use release signing credentials.
 The debug package is `com.moonbench.bifrost.debug`; release remains
 `com.moonbench.bifrost`. Keep the release application ID and external API intent
 names stable so integrations continue to work.
