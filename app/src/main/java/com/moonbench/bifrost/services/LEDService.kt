@@ -1032,7 +1032,12 @@ class LEDService : Service() {
         clearMediaProjection()
         try {
             val projection = mediaProjectionManager.getMediaProjection(resultCode, data) ?: return
-            val session = ProjectionCapture(projection, handler, ::onProjectionRevoked)
+            val session = try {
+                ProjectionCapture(projection, handler, ::onProjectionRevoked)
+            } catch (e: Exception) {
+                runCatching { projection.stop() }
+                throw e
+            }
             synchronized(mediaProjectionLock) {
                 mediaProjection = session
                 hasLiveProjection = true
@@ -1179,12 +1184,23 @@ class LEDService : Service() {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
-        handler.removeCallbacks(activityCheckRunnable)
+        // Destruction must be synchronous. Delayed teardown can otherwise revoke
+        // a replacement service's capture or overwrite its shared running state.
+        isStopping.set(true)
+        handler.removeCallbacksAndMessages(null)
         clearPendingCallbacks()
+        isRunning = false
+        lastProjectionData = null
+        lastProjectionResultCode = Activity.RESULT_CANCELED
+        stopCurrentAnimation()
+        clearMediaProjection()
+        releasePipboyWakeLock()
         unregisterBatteryStateReceiver()
         unmountScreenBrightnessObserver()
-        cleanupAndStop()
+        runCatching { ledController.shutdown() }
+            .onFailure { Log.w(TAG, "LED shutdown failed", it) }
+        BifrostTileService.refreshFrom(this)
+        super.onDestroy()
     }
 
     private fun clearPendingCallbacks() {

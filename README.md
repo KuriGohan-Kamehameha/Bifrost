@@ -51,7 +51,7 @@ When choosing the custom color sampler, Bifrost captures the screen using a **lo
 
 ## Audio Reactive
 
-Analyzes live audio levels (using the screen recording permission) to drive LED intensity.
+Analyzes live playback audio levels (using Android audio and screen recording permissions) to drive LED intensity.
 
 ### Improvements
 
@@ -192,6 +192,17 @@ Used exclusively to sample:
 - Audio intensity (Audio Reactive)
 
 Bifrost does **not save or transmit screen contents** — sampling happens locally and is reduced to minimal pixel data for efficiency.
+
+### Audio permission
+
+Audio Reactive and Ambi Aurora also request Android's audio permission. Android
+labels this permission as microphone access, but Bifrost uses it only for playback
+audio capture, not microphone recording. Games and apps may prohibit playback
+capture. Ambient color sampling does not need audio permission.
+
+Screen capture consent belongs to the running LED service. Changing settings or
+presets reuses that session; stopping the service or revoking screen capture
+requires fresh consent before capture can resume.
 
 ---
 

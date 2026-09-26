@@ -572,6 +572,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingCaptureNeedsAudio = savedInstanceState?.getBoolean("pendingCaptureNeedsAudio") ?: false
+        isGrantingProjectionForAppProfile = savedInstanceState?.getBoolean("grantingProjectionForProfile") ?: false
 
         if (intent.getBooleanExtra("finish", false)) {
             finishAffinity()
@@ -2399,6 +2401,12 @@ class MainActivity : AppCompatActivity() {
         coverFlowSnapRunnable = null
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("pendingCaptureNeedsAudio", pendingCaptureNeedsAudio)
+        outState.putBoolean("grantingProjectionForProfile", isGrantingProjectionForAppProfile)
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         if (!isAppInitialized) return
@@ -4160,6 +4168,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestScreenCapturePermission(needsAudio: Boolean = selectedAnimationType.supportsAudioSensitivity) {
         pendingCaptureNeedsAudio = needsAudio
+        mediaProjectionResultCode = null
+        mediaProjectionData = null
         if (needsAudio && !hasAudioPermission()) {
             Toast.makeText(this, "Android requires audio permission to sample game audio; Bifrost does not use the microphone.", Toast.LENGTH_LONG).show()
             audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)

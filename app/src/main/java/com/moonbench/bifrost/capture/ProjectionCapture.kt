@@ -29,6 +29,7 @@ class ProjectionCapture(
     private val callback = object : MediaProjection.Callback() {
         override fun onStop() {
             try { close() }
+            catch (e: Exception) { android.util.Log.w("ProjectionCapture", "Capture cleanup failed", e) }
             finally { onRevoked(this@ProjectionCapture) }
         }
     }

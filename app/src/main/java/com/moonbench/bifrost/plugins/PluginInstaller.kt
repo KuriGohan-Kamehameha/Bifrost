@@ -69,9 +69,17 @@ object PluginInstaller {
         if (imported.presets.isEmpty()) return Result.Failure("bundle contains no presets")
 
         val owner = ownerOf(entry.id)
-        // Clear any prior version's presets + live policies first (clean update).
+        val incomingNames = imported.presets.map { it.name }
+        val existing = readPresets(prefs)
+        val reservedNames = (0 until existing.length()).mapNotNull { index ->
+            existing.optJSONObject(index)?.takeUnless { it.optString("ownerPackage") == owner }
+                ?.optString("name")
+        }.toSet()
+        PluginPresetPlan.validate(incomingNames, reservedNames)?.let { return Result.Failure(it) }
+
+        // Retain user mappings to names that survive this plugin update.
         val removed = ExternalProfileStore.removePresetsOwnedBy(prefs, owner)
-        AppProfileManager(prefs).removeMappingsReferencing(removed)
+        AppProfileManager(prefs).removeMappingsReferencing(PluginPresetPlan.retiredNames(removed, incomingNames))
         LivePolicyStore.removeByOwner(prefs, entry.id)
 
         val list = readPresets(prefs)

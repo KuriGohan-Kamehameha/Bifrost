@@ -96,9 +96,8 @@ class AudioAnalyzer(
             running = true
 
             captureThread = Thread({
-                Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
-
                 try {
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
                     record.startRecording()
 
                     if (HardwareDeviceBlacklist.isBlockedMicrophoneDevice(record.routedDevice)) {
@@ -191,10 +190,13 @@ class AudioAnalyzer(
                 routingListener?.let { listener ->
                     runCatching { record.removeOnRoutingChangedListener(listener) }
                 }
-                if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
-                    record.stop()
+                try {
+                    if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                        record.stop()
+                    }
+                } finally {
+                    record.release()
                 }
-                record.release()
             }
         } catch (e: Exception) {
             Log.w(TAG, "Audio record cleanup failed", e)

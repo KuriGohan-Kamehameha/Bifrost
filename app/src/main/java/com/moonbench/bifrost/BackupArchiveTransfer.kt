@@ -6,9 +6,8 @@ import android.net.Uri
 import android.os.CancellationSignal
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
+import com.moonbench.bifrost.io.BoundedArchive
 import java.util.zip.ZipEntry
-import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 object BackupArchiveTransfer {
@@ -94,7 +93,9 @@ object BackupArchiveTransfer {
         }
 
         cancelSignal?.throwIfCanceled()
-        context.contentResolver.openOutputStream(uri)?.use { stream ->
+        val destination = context.contentResolver.openOutputStream(uri)
+            ?: throw java.io.IOException("Unable to open destination for export")
+        destination.use { stream ->
             ZipOutputStream(stream.buffered()).use { zip ->
                 cancelSignal?.throwIfCanceled()
                 zip.putNextEntry(ZipEntry(MANIFEST_ENTRY_NAME))
@@ -157,33 +158,15 @@ object BackupArchiveTransfer {
         val warnings = mutableListOf<String>()
         val errors = mutableListOf<String>()
 
-        val zipEntries = mutableMapOf<String, ByteArray>()
         cancelSignal?.throwIfCanceled()
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            ZipInputStream(input.buffered()).use { zip ->
-                while (true) {
-                    cancelSignal?.throwIfCanceled()
-                    val entry = zip.nextEntry ?: break
-                    if (entry.isDirectory) {
-                        zip.closeEntry()
-                        continue
-                    }
-
-                    val data = ByteArrayOutputStream().use { output ->
-                        zip.copyTo(output)
-                        output.toByteArray()
-                    }
-                    zipEntries[entry.name] = data
-                    zip.closeEntry()
-                }
-            }
-        } ?: return ImportResult(
-            preferenceCount = 0,
-            iconCount = 0,
-            appliedOptions = options,
-            warnings = emptyList(),
-            errors = listOf("Unable to read selected file.")
-        )
+        val input = context.contentResolver.openInputStream(uri)
+            ?: return ImportResult(0, 0, options, emptyList(), listOf("Unable to read selected file."))
+        val zipEntries = try {
+            BoundedArchive.read(input, maxTotalBytes = 64 * 1024 * 1024, maxEntries = 512,
+                checkCanceled = { cancelSignal?.throwIfCanceled() })
+        } catch (e: java.io.IOException) {
+            return ImportResult(0, 0, options, emptyList(), listOf(e.message ?: "Invalid archive"))
+        }
 
         val manifestRaw = zipEntries[MANIFEST_ENTRY_NAME]
             ?: return ImportResult(

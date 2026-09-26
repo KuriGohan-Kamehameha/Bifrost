@@ -24,8 +24,8 @@ Gradle wrapper. Set `ANDROID_HOME` or an ignored `local.properties` with `sdk.di
 ```
 
 The Android checks workflow runs unit tests and both builds on pull requests and
-pushes to main. Lint runs as an advisory check and its report is retained with
-the test reports; inspect findings before a release. The workflow does not
+pushes to main and maintenance branches. Lint errors fail the workflow; its
+report is retained with the test reports. Review remaining warnings before a release. The workflow does not
 publish APKs or use release signing credentials.
 The debug package is `com.moonbench.bifrost.debug`; release remains
 `com.moonbench.bifrost`. Keep the release application ID and external API intent
@@ -93,18 +93,36 @@ compiled debug and minified unsigned release builds and passed **60 tests in 12
 suites**, with no failures, errors, or skipped tests. The live maintained plugin
 catalogue and its bundle were fetched and their SHA-256 verified.
 
-Lint is **not clean**: it reports 3 errors and 402 warnings. The error locations
-are unchanged from upstream 1.3.1:
+## Maintenance hardening (2026-09-26)
 
-- `AudioAnalyzer.kt:55`: two `MissingPermission` findings. The manifest lacks
-  `RECORD_AUDIO`, and the playback-capture setup needs a permission review with
-  the Audio Reactive/Ambi Aurora consent flow before a new release.
-- `BifrostTileService.kt:87`: `StartActivityAndCollapseDeprecated` on the Intent
-  overload. The source already uses PendingIntent on Android 14+ and limits the
-  old overload to earlier versions; review the compatibility path and lint
-  handling rather than removing support for Android 13.
+The capture service now owns the MediaProjection session and one reusable virtual
+display. Consent is consumed once, parameter changes reconfigure the running
+service, and revocation invalidates the session. Audio capture checks and requests
+RECORD_AUDIO before startup; denied permission remains a recoverable user action.
+These follow Android's [MediaProjection session rules](https://developer.android.com/media/grow/media-projection)
+and [playback capture requirements](https://developer.android.com/media/platform/av-capture).
+The Android 13 quick-settings compatibility call has a narrowly scoped lint
+suppression; Android 14+ continues to use PendingIntent.
 
-These findings are retained in the CI reports and are release follow-up work;
-CI's green build/test result must not be described as a clean lint result or
-hardware qualification. No APK was installed, signed anew, or published during
-this source handoff.
+Plugin catalogue IDs and metadata are validated before use. Downloads require
+HTTPS (including redirects), cap catalogue responses at 512 KiB and bundles at
+8 MiB, and use random temporary filenames. ZIP imports cap each expanded entry
+at 8 MiB. Preset/plugin bundles allow 32 MiB total and 256 entries; full backups
+allow 64 MiB total and 512 entries. Unknown entries and directory payloads count
+toward limits. Duplicate or unsafe paths fail before archive contents are applied.
+Oversized legitimate backups must be split or their limits deliberately revisited.
+Plugin updates reject duplicate names and conflicts with user/other-plugin presets,
+and retain app mappings to presets that survive the update.
+
+[First hardening CI run](https://github.com/KuriGohan-Kamehameha/Bifrost/actions/runs/36280003316)
+passed 80 tests in 16 suites, debug and minified unsigned release builds, and the
+now-required lint check: **zero errors, 400 warnings**. Most warnings concern UI
+text, text sizes, Kotlin conveniences, unused resources, and dependency versions.
+Further backup import, teardown, and regression coverage is checked by subsequent
+runs linked to the maintenance commit; this earlier run is not evidence for later
+changes.
+
+Before a binary release, test permission denial/retry, consent across rotation,
+repeated capture preset/settings changes, system capture revocation, stop/start,
+and audio routing on actual Thor hardware. CI does not qualify hardware behavior.
+No new APK has been installed, signed, or published by this source maintenance.

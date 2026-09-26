@@ -12,7 +12,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import com.moonbench.bifrost.io.BoundedArchive
 import java.util.zip.ZipEntry
-import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 object PresetArchiveTransfer {
@@ -101,7 +100,9 @@ object PresetArchiveTransfer {
         val seenIconNames = linkedSetOf<String>()
         // Check for cancellation before starting heavy IO
         cancelSignal?.throwIfCanceled()
-        context.contentResolver.openOutputStream(uri)?.use { stream ->
+        val destination = context.contentResolver.openOutputStream(uri)
+            ?: throw java.io.IOException("Unable to open destination for export")
+        destination.use { stream ->
             ZipOutputStream(stream.buffered()).use { zip ->
                 cancelSignal?.throwIfCanceled()
                 zip.putNextEntry(ZipEntry(MANIFEST_ENTRY_NAME))
@@ -179,6 +180,8 @@ object PresetArchiveTransfer {
         } else if (version > ARCHIVE_VERSION) {
             warnings += "Bundle version $version is newer than supported version $ARCHIVE_VERSION. Attempting compatible import."
         }
+
+        if (errors.isNotEmpty()) return ImportResult(emptyList(), emptyMap(), warnings, errors)
 
         val presetArray = manifest.optJSONArray("presets") ?: JSONArray()
         val importedPresets = mutableListOf<LedPreset>()
