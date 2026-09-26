@@ -114,13 +114,13 @@ Oversized legitimate backups must be split or their limits deliberately revisite
 Plugin updates reject duplicate names and conflicts with user/other-plugin presets,
 and retain app mappings to presets that survive the update.
 
-[First hardening CI run](https://github.com/KuriGohan-Kamehameha/Bifrost/actions/runs/36280003316)
-passed 80 tests in 16 suites, debug and minified unsigned release builds, and the
-now-required lint check: **zero errors, 400 warnings**. Most warnings concern UI
-text, text sizes, Kotlin conveniences, unused resources, and dependency versions.
-Further backup import, teardown, and regression coverage is checked by subsequent
-runs linked to the maintenance commit; this earlier run is not evidence for later
-changes.
+[Final hardening CI run](https://github.com/KuriGohan-Kamehameha/Bifrost/actions/runs/36280537500)
+at source commit `3fcdfaa7c104366bbbffba57692d97e8c4a1671b` passed **88 tests
+in 18 suites** with no failures, errors, or skipped tests, debug and minified
+unsigned release builds, and the now-required lint check: **zero errors, 400
+warnings**. Most warnings concern UI text, text sizes, Kotlin conveniences,
+unused resources, and dependency versions. The subsequent validation-record
+commit changes only this document.
 
 Before a binary release, test permission denial/retry, consent across rotation,
 repeated capture preset/settings changes, system capture revocation, stop/start,
