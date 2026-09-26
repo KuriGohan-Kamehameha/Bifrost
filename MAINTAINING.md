@@ -85,3 +85,26 @@ in the Plugin Store to:
 ```
 https://raw.githubusercontent.com/KuriGohan-Kamehameha/Bifrost/plugin-catalog/catalog.json
 ```
+
+## Handoff validation (2026-09-26)
+
+[Integration CI run](https://github.com/KuriGohan-Kamehameha/Bifrost/actions/runs/36278878810)
+compiled debug and minified unsigned release builds and passed **60 tests in 12
+suites**, with no failures, errors, or skipped tests. The live maintained plugin
+catalogue and its bundle were fetched and their SHA-256 verified.
+
+Lint is **not clean**: it reports 3 errors and 402 warnings. The error locations
+are unchanged from upstream 1.3.1:
+
+- `AudioAnalyzer.kt:55`: two `MissingPermission` findings. The manifest lacks
+  `RECORD_AUDIO`, and the playback-capture setup needs a permission review with
+  the Audio Reactive/Ambi Aurora consent flow before a new release.
+- `BifrostTileService.kt:87`: `StartActivityAndCollapseDeprecated` on the Intent
+  overload. The source already uses PendingIntent on Android 14+ and limits the
+  old overload to earlier versions; review the compatibility path and lint
+  handling rather than removing support for Android 13.
+
+These findings are retained in the CI reports and are release follow-up work;
+CI's green build/test result must not be described as a clean lint result or
+hardware qualification. No APK was installed, signed anew, or published during
+this source handoff.
