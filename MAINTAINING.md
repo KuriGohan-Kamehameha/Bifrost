@@ -59,6 +59,16 @@ Before publishing:
 5. Link users and Obtainium to this fork's releases. Source integration by itself
    does not create a release or make an older beta the new recommended download.
 
+### Original 1.3.1 reference APK
+
+The upstream asset `bifrost-1.3.1.apk` was downloaded and its APK signature
+verified during the handoff. These identify the original binary, not a new fork
+build or proof that this fork possesses its private signing key:
+
+- APK SHA-256: `01734989eec369a0b7a1c8885f88308c96f1242fd7bd50c8f025f5dba7d906cd`
+- Signer certificate SHA-256: `d15fe2c3a3980f08c3aa5badce6d9e36c662a9b9b7cd4e6e7b254c56aa3a4e5d`
+- Signer subject: `O=MoonBench`
+
 ## Plugin catalogue
 
 The maintained catalogue lives on this repository's **`plugin-catalog`** branch,
