@@ -88,6 +88,11 @@ class ServiceController(
             onNeedsMediaProjectionCheck?.invoke()
             return
         }
+        if (LEDService.isRunning) {
+            // Reconfigure in place: stopping the service revokes capture consent.
+            startDebounced(createIntent)
+            return
+        }
         beginOperationWindow()
         val token = operationToken
 

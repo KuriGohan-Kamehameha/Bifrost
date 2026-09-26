@@ -12,6 +12,7 @@ import kotlin.math.roundToInt
 
 class AudioReactiveAnimation(
     ledController: LedController,
+    private val context: android.content.Context,
     private val mediaProjection: MediaProjection,
     private val displayMetrics: DisplayMetrics,
     private val baseColor: Int,
@@ -96,7 +97,7 @@ class AudioReactiveAnimation(
         updateHandler = Handler(updateThread!!.looper)
         updateHandler?.post(ledUpdateRunnable)
 
-        audioAnalyzer = AudioAnalyzer(mediaProjection, profile) { intensity ->
+        audioAnalyzer = AudioAnalyzer(context, mediaProjection, profile) { intensity ->
             pendingIntensity = intensity
             hasAudioUpdate = true
         }

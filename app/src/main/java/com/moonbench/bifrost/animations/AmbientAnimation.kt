@@ -1,7 +1,7 @@
 package com.moonbench.bifrost.animations
 
 import android.graphics.Color
-import android.media.projection.MediaProjection
+import com.moonbench.bifrost.capture.ProjectionCapture
 import android.util.DisplayMetrics
 import android.view.Display
 import com.moonbench.bifrost.animations.LedAnimationType
@@ -13,7 +13,7 @@ import kotlin.math.roundToInt
 
 class AmbientAnimation(
     ledController: LedController,
-    private val mediaProjection: MediaProjection?,
+    private val mediaProjection: ProjectionCapture?,
     private val displayMetrics: DisplayMetrics,
     private val profile: PerformanceProfile,
     private val useCustomSampling: Boolean,

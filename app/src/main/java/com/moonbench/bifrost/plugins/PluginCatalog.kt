@@ -1,6 +1,7 @@
 package com.moonbench.bifrost.plugins
 
 import org.json.JSONObject
+import java.net.URI
 
 /**
  * The plugin store data model.
@@ -44,16 +45,20 @@ data class PluginCatalog(
                 throw CatalogParseException("unexpected schema '$schema' (want '$SCHEMA')")
             }
             val schemaVersion = root.optInt("version", 0)
-            if (schemaVersion > SUPPORTED_SCHEMA_VERSION) {
+            if (schemaVersion != SUPPORTED_SCHEMA_VERSION) {
                 throw CatalogParseException(
                     "catalogue schema v$schemaVersion is newer than supported " +
                         "v$SUPPORTED_SCHEMA_VERSION — update Bifrost")
             }
             val arr = root.optJSONArray("plugins") ?: org.json.JSONArray()
             val entries = ArrayList<CatalogEntry>(arr.length())
+            val ids = HashSet<String>()
             for (i in 0 until arr.length()) {
                 val obj = arr.optJSONObject(i) ?: continue
-                CatalogEntry.parseOrNull(obj)?.let(entries::add)
+                CatalogEntry.parseOrNull(obj)?.let { entry ->
+                    if (!ids.add(entry.id)) throw CatalogParseException("duplicate plugin id '${entry.id}'")
+                    entries.add(entry)
+                }
             }
             return PluginCatalog(schemaVersion, entries)
         }
@@ -81,11 +86,23 @@ data class CatalogEntry(
     val bundleSha256: String?,         // optional integrity check (lower-case hex)
 ) {
     companion object {
-        /** Lenient parse — returns null if a required field is absent. */
+        fun isSafeId(id: String): Boolean = id.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))
+
+        fun isHttpsUrl(value: String): Boolean = try {
+            val uri = URI(value)
+            uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank() && uri.userInfo == null
+        } catch (_: java.net.URISyntaxException) { false }
+
+        /** Invalid entries are skipped before they can become file paths or requests. */
         fun parseOrNull(o: JSONObject): CatalogEntry? {
             val id = o.optString("id").takeIf { it.isNotBlank() } ?: return null
             val bundleUrl = o.optString("bundleUrl").takeIf { it.isNotBlank() } ?: return null
-            if (!o.has("version")) return null
+            if (!isSafeId(id) || !isHttpsUrl(bundleUrl)) return null
+            val version = o.optInt("version", -1)
+            if (version < 1) return null
+            val checksum = o.optString("bundleSha256").takeIf { it.isNotBlank() }
+            if (checksum != null && !checksum.matches(Regex("[A-Fa-f0-9]{64}"))) return null
+            if (o.optInt("minBifrostVersionCode", 0) < 0) return null
             return CatalogEntry(
                 id = id,
                 name = o.optString("name", id),

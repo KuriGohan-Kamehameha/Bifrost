@@ -1,7 +1,7 @@
 package com.moonbench.bifrost.animations
 
 import android.graphics.Color
-import android.media.projection.MediaProjection
+import com.moonbench.bifrost.capture.ProjectionCapture
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.DisplayMetrics
@@ -14,7 +14,8 @@ import kotlin.math.roundToInt
 
 class AmbiAuroraAnimation(
     ledController: LedController,
-    private val mediaProjection: MediaProjection,
+    private val context: android.content.Context,
+    private val mediaProjection: ProjectionCapture,
     private val displayMetrics: DisplayMetrics,
     private val profile: PerformanceProfile,
     private val useCustomSampling: Boolean,
@@ -140,7 +141,7 @@ class AmbiAuroraAnimation(
         }
         screenAnalyzer?.start()
 
-        audioAnalyzer = AudioAnalyzer(mediaProjection, profile) { intensity ->
+        audioAnalyzer = AudioAnalyzer(context, mediaProjection.projection, profile) { intensity ->
             pendingIntensity = intensity
             hasAudioUpdate = true
         }

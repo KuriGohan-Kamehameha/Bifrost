@@ -10,7 +10,7 @@ import com.moonbench.bifrost.plugins.LivePolicy
 import com.moonbench.bifrost.tools.PerformanceProfile
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
+import com.moonbench.bifrost.io.BoundedArchive
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -141,33 +141,14 @@ object PresetArchiveTransfer {
         val warnings = mutableListOf<String>()
         val errors = mutableListOf<String>()
 
-        val zipEntries = mutableMapOf<String, ByteArray>()
-        // Check cancellation before reading
         cancelSignal?.throwIfCanceled()
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            ZipInputStream(input.buffered()).use { zip ->
-                while (true) {
-                    cancelSignal?.throwIfCanceled()
-                    val entry = zip.nextEntry ?: break
-                    if (entry.isDirectory) {
-                        zip.closeEntry()
-                        continue
-                    }
-
-                    val data = ByteArrayOutputStream().use { output ->
-                        zip.copyTo(output)
-                        output.toByteArray()
-                    }
-                    zipEntries[entry.name] = data
-                    zip.closeEntry()
-                }
-            }
-        } ?: return ImportResult(
-            presets = emptyList(),
-            mappings = emptyMap(),
-            warnings = emptyList(),
-            errors = listOf("Unable to read selected file.")
-        )
+        val input = context.contentResolver.openInputStream(uri)
+            ?: return ImportResult(emptyList(), emptyMap(), emptyList(), listOf("Unable to read selected file."))
+        val zipEntries = try {
+            BoundedArchive.read(input, checkCanceled = { cancelSignal?.throwIfCanceled() })
+        } catch (e: java.io.IOException) {
+            return ImportResult(emptyList(), emptyMap(), emptyList(), listOf(e.message ?: "Invalid archive"))
+        }
 
         val manifestRaw = zipEntries[MANIFEST_ENTRY_NAME]
             ?: return ImportResult(

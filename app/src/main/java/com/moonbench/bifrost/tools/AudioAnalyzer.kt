@@ -1,5 +1,9 @@
 package com.moonbench.bifrost.tools
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
@@ -14,6 +18,7 @@ import kotlin.math.abs
 
 @RequiresApi(Build.VERSION_CODES.Q)
 class AudioAnalyzer(
+    private val context: Context,
     private val mediaProjection: MediaProjection,
     private val performanceProfile: PerformanceProfile,
     private val callback: (Float) -> Unit
@@ -36,7 +41,12 @@ class AudioAnalyzer(
 
     fun start() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
-        if (running) return
+        if (running || captureThread?.isAlive == true) return
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            Log.w(TAG, "Playback capture needs audio permission")
+            return
+        }
 
         try {
             val config = AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
@@ -49,6 +59,7 @@ class AudioAnalyzer(
             val channelConfig = AudioFormat.CHANNEL_IN_MONO
             val encoding = AudioFormat.ENCODING_PCM_16BIT
             val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, encoding)
+            check(minBufferSize > 0) { "Unsupported audio buffer configuration: $minBufferSize" }
             val bufferSize = maxOf(DEFAULT_BUFFER_BYTES, minBufferSize)
             sampleBuffer = ShortArray((bufferSize / 2).coerceAtLeast(128))
 
@@ -76,7 +87,6 @@ class AudioAnalyzer(
                 if (HardwareDeviceBlacklist.isBlockedMicrophoneDevice(audioRoute.routedDevice)) {
                     Log.w(TAG, "Blocked physical microphone route detected; stopping capture")
                     running = false
-                    cleanup()
                 }
             }
             routingListener?.let { listener ->
@@ -94,7 +104,6 @@ class AudioAnalyzer(
                     if (HardwareDeviceBlacklist.isBlockedMicrophoneDevice(record.routedDevice)) {
                         Log.w(TAG, "Initial route resolved to blocked microphone; aborting capture")
                         running = false
-                        cleanup()
                         return@Thread
                     }
 
@@ -106,7 +115,15 @@ class AudioAnalyzer(
                     }
 
                     while (running) {
-                        val read = record.read(sampleBuffer, 0, sampleBuffer.size)
+                        val read = record.read(sampleBuffer, 0, sampleBuffer.size, AudioRecord.READ_NON_BLOCKING)
+                        if (read < 0) {
+                            Log.w(TAG, "Audio capture stopped with code $read")
+                            break
+                        }
+                        if (read == 0) {
+                            Thread.sleep(8)
+                            continue
+                        }
 
                         if (read > 0) {
                             if (skip > 0) {
@@ -125,16 +142,25 @@ class AudioAnalyzer(
                             }
 
                             val intensity = (max.toFloat() / Short.MAX_VALUE * 5f).coerceIn(0f, 1f)
-                            callback(intensity)
+                            if (running) callback(intensity)
                         }
                     }
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
                 } catch (e: Exception) {
                     Log.w(TAG, "Audio capture loop failed", e)
+                } finally {
+                    running = false
+                    cleanup()
                 }
             }, "AudioCapture")
 
             captureThread?.start()
 
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Audio permission or capture consent was revoked", e)
+            running = false
+            cleanup()
         } catch (e: Exception) {
             Log.w(TAG, "Audio analyzer failed to start", e)
             running = false
@@ -144,20 +170,22 @@ class AudioAnalyzer(
 
     fun stop() {
         running = false
-
-        captureThread?.let { thread ->
-            thread.interrupt()
-            runCatching { thread.join(THREAD_JOIN_TIMEOUT_MS) }
-            if (thread.isAlive) {
-                Log.w(TAG, "Audio capture thread did not stop within timeout")
-            }
+        val thread = captureThread
+        thread?.interrupt()
+        if (thread != null && thread !== Thread.currentThread()) {
+            try { thread.join(THREAD_JOIN_TIMEOUT_MS) }
+            catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+        }
+        if (thread?.isAlive == true) {
+            // The worker owns the record until it exits. Do not release under read().
+            Log.w(TAG, "Audio worker is finishing shutdown")
+            return
         }
         captureThread = null
-
         cleanup()
     }
 
-    private fun cleanup() {
+    @Synchronized private fun cleanup() {
         try {
             audioRecord?.let { record ->
                 routingListener?.let { listener ->

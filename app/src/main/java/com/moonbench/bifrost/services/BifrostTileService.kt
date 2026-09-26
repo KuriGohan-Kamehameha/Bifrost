@@ -83,9 +83,15 @@ class BifrostTileService : TileService() {
             )
             startActivityAndCollapse(pending)
         } else {
-            @Suppress("DEPRECATION")
-            startActivityAndCollapse(launch)
+            openAppOnAndroid13(launch)
         }
+    }
+
+    // The PendingIntent overload is API 34+. This helper is reached only on API 33.
+    @android.annotation.SuppressLint("StartActivityAndCollapseDeprecated")
+    @Suppress("DEPRECATION")
+    private fun openAppOnAndroid13(launch: Intent) {
+        startActivityAndCollapse(launch)
     }
 
     private fun renderState(forcedRunning: Boolean? = null) {

@@ -4,11 +4,9 @@ import android.accessibilityservice.AccessibilityService
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.hardware.display.DisplayManager
-import android.hardware.display.VirtualDisplay
 import android.media.Image
 import android.media.ImageReader
-import android.media.projection.MediaProjection
+import com.moonbench.bifrost.capture.ProjectionCapture
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
@@ -60,7 +58,7 @@ data class ScreenColors(
 )
 
 class ScreenAnalyzer(
-    private val mediaProjection: MediaProjection? = null,
+    private val mediaProjection: ProjectionCapture? = null,
     private val displayMetrics: DisplayMetrics,
     var performanceProfile: PerformanceProfile = PerformanceProfile.HIGH,
     var useCustomSampling: Boolean = false,
@@ -81,10 +79,9 @@ class ScreenAnalyzer(
     private var lastEmittedColors: ScreenColors? = null
 
     private var imageReader: ImageReader? = null
-    private var virtualDisplay: VirtualDisplay? = null
+    private var captureSurface: android.view.Surface? = null
     private var handlerThread: HandlerThread? = null
     private var handler: Handler? = null
-    private var projectionCallback: MediaProjection.Callback? = null
     @Volatile private var isRunning: Boolean = false
 
     // Accessibility path only
@@ -130,15 +127,13 @@ class ScreenAnalyzer(
         // Detach the frame listener before releasing the reader so an in-flight
         // capture callback on the handler thread can't touch a closed reader.
         runCatching { imageReader?.setOnImageAvailableListener(null, null) }
-        virtualDisplay?.release()
-        virtualDisplay = null
+        captureSurface?.let { mediaProjection?.display?.detach(it) }
+        captureSurface = null
         imageReader?.close()
         imageReader = null
         handlerThread?.quitSafely()
         handlerThread = null
         handler = null
-        projectionCallback?.let { mediaProjection?.unregisterCallback(it) }
-        projectionCallback = null
         captureInFlight = false
         lastEmittedColors = null
     }
@@ -169,17 +164,10 @@ class ScreenAnalyzer(
             }
         }, handler)
         imageReader = ir
-        projectionCallback = object : MediaProjection.Callback() {
-            override fun onStop() { stop() }
-        }
-        mediaProjection!!.registerCallback(projectionCallback!!, handler)
-        virtualDisplay = mediaProjection.createVirtualDisplay(
-            "AmbilightCapture",
-            captureWidth, captureHeight,
-            displayMetrics.densityDpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            ir.surface, null, null
-        )
+        val surface = ir.surface
+        captureSurface = surface
+        mediaProjection!!.display.attach(surface, captureWidth, captureHeight, displayMetrics.densityDpi)
+
     }
 
     private fun processImage(image: Image) {

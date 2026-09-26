@@ -39,13 +39,18 @@ object PluginInstaller {
     /** Owner tag stored on a plugin's presets, used to clean them up later. */
     fun ownerOf(id: String): String = "plugin:$id"
 
-    fun install(context: Context, prefs: SharedPreferences, entry: CatalogEntry): Result {
+    @Synchronized fun install(context: Context, prefs: SharedPreferences, entry: CatalogEntry): Result {
         if (entry.minBifrostVersionCode > appVersionCode(context)) {
             return Result.Failure(
                 "needs Bifrost version ${entry.minBifrostVersionCode}+ (you have ${appVersionCode(context)})")
         }
 
-        val cache = File(context.cacheDir, "plugins/${entry.id}-${entry.version}.bfplugin")
+        if (!CatalogEntry.isSafeId(entry.id) || entry.version < 1) return Result.Failure("Invalid plugin identity")
+        val cache = try {
+            File.createTempFile("bifrost-plugin-", ".bfplugin", context.cacheDir)
+        } catch (e: java.io.IOException) {
+            return Result.Failure("Cannot create plugin download: ${e.message}")
+        }
         when (val dl = PluginRepository.downloadBundle(entry, cache)) {
             is PluginRepository.DownloadResult.Failure -> return Result.Failure(dl.message)
             is PluginRepository.DownloadResult.Success -> Unit
@@ -53,7 +58,7 @@ object PluginInstaller {
 
         val imported = try {
             PresetArchiveTransfer.importFromUri(context, Uri.fromFile(cache))
-        } catch (t: Throwable) {
+        } catch (t: Exception) {
             return Result.Failure("import failed: ${t.message}")
         } finally {
             if (cache.exists() && !cache.delete()) {
@@ -65,7 +70,8 @@ object PluginInstaller {
 
         val owner = ownerOf(entry.id)
         // Clear any prior version's presets + live policies first (clean update).
-        ExternalProfileStore.removePresetsOwnedBy(prefs, owner)
+        val removed = ExternalProfileStore.removePresetsOwnedBy(prefs, owner)
+        AppProfileManager(prefs).removeMappingsReferencing(removed)
         LivePolicyStore.removeByOwner(prefs, entry.id)
 
         val list = readPresets(prefs)
@@ -85,7 +91,7 @@ object PluginInstaller {
         return Result.Success(imported.presets.map { it.name })
     }
 
-    fun uninstall(prefs: SharedPreferences, entry: CatalogEntry): Result {
+    @Synchronized fun uninstall(prefs: SharedPreferences, entry: CatalogEntry): Result {
         val removed = ExternalProfileStore.removePresetsOwnedBy(prefs, ownerOf(entry.id))
         if (removed.isNotEmpty()) {
             AppProfileManager(prefs).removeMappingsReferencing(removed)
@@ -144,7 +150,7 @@ object PluginInstaller {
         val pi = context.packageManager.getPackageInfo(context.packageName, 0)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P)
             pi.longVersionCode.toInt() else @Suppress("DEPRECATION") pi.versionCode
-    } catch (t: Throwable) {
+    } catch (t: Exception) {
         0
     }
 }

@@ -1,5 +1,6 @@
 package com.moonbench.bifrost.plugins
 
+import com.moonbench.bifrost.io.BoundedInput
 import android.content.SharedPreferences
 import java.io.File
 import java.io.IOException
@@ -15,7 +16,7 @@ import java.security.MessageDigest
 object PluginRepository {
 
     private const val DEFAULT_TIMEOUT_MS = 10_000
-    private const val MAX_BUNDLE_BYTES = 8L * 1024 * 1024   // 8 MB sanity cap
+    private const val MAX_BUNDLE_BYTES = 8 * 1024 * 1024   // 8 MB sanity cap
 
     sealed class CatalogResult {
         data class Success(val catalog: PluginCatalog) : CatalogResult()
@@ -33,7 +34,7 @@ object PluginRepository {
             CatalogResult.Success(PluginCatalog.parse(httpGetText(url, timeoutMs)))
         } catch (e: CatalogParseException) {
             CatalogResult.Failure(e.message ?: "malformed catalogue")
-        } catch (t: Throwable) {
+        } catch (t: Exception) {
             CatalogResult.Failure("could not reach catalogue: ${t.message}")
         }
 
@@ -74,7 +75,7 @@ object PluginRepository {
                 }
             }
             DownloadResult.Success(dest)
-        } catch (t: Throwable) {
+        } catch (t: Exception) {
             dest.delete()
             DownloadResult.Failure("download failed: ${t.message}")
         }
@@ -82,49 +83,59 @@ object PluginRepository {
 
     // ---- HTTP ------------------------------------------------------------
 
-    private fun openGet(url: String, timeoutMs: Int): HttpURLConnection =
-        (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = timeoutMs
-            readTimeout = timeoutMs
-            instanceFollowRedirects = true
-            setRequestProperty("Accept", "application/json, application/octet-stream")
-            setRequestProperty("User-Agent", "Bifrost-PluginStore")
+    private fun openGet(url: String, timeoutMs: Int): HttpURLConnection {
+        require(timeoutMs in 1..60_000) { "Invalid network timeout" }
+        var target = url
+        for (redirect in 0..5) {
+            require(CatalogEntry.isHttpsUrl(target)) { "Plugin sources must use HTTPS" }
+            val conn = (URL(target).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = timeoutMs
+                readTimeout = timeoutMs
+                instanceFollowRedirects = false
+                setRequestProperty("Accept", "application/json, application/octet-stream")
+                setRequestProperty("User-Agent", "Bifrost-PluginStore")
+            }
+            try {
+                val code = conn.responseCode
+                if (code in 200..299) return conn
+                if (code !in listOf(301, 302, 303, 307, 308)) throw IOException("HTTP $code")
+                val location = conn.getHeaderField("Location") ?: throw IOException("Missing redirect location")
+                target = URL(URL(target), location).toString()
+            } catch (e: Exception) {
+                conn.disconnect()
+                throw e
+            }
+            conn.disconnect()
         }
+        throw IOException("Too many redirects")
+    }
+
+    private fun readDeadline(): () -> Unit {
+        val deadline = System.nanoTime() + 60_000_000_000L
+        return {
+            if (Thread.currentThread().isInterrupted || System.nanoTime() >= deadline)
+                throw IOException("Download cancelled or timed out")
+        }
+    }
 
     private fun httpGetText(url: String, timeoutMs: Int): String {
         val conn = openGet(url, timeoutMs)
         try {
-            val code = conn.responseCode
-            if (code !in 200..299) throw IOException("HTTP $code")
-            return conn.inputStream.bufferedReader().use { it.readText() }
-        } finally {
-            conn.disconnect()
-        }
+            return conn.inputStream.use { BoundedInput.read(it, 512 * 1024, readDeadline()) }
+                .toString(Charsets.UTF_8)
+        } finally { conn.disconnect() }
     }
 
     private fun httpDownload(url: String, dest: File, timeoutMs: Int) {
         val conn = openGet(url, timeoutMs)
         try {
-            val code = conn.responseCode
-            if (code !in 200..299) throw IOException("HTTP $code")
-            dest.parentFile?.mkdirs()
+            val parent = dest.parentFile
+            if (parent != null && !parent.isDirectory && !parent.mkdirs()) throw IOException("Cannot create download directory")
             conn.inputStream.use { input ->
-                dest.outputStream().use { output ->
-                    val buf = ByteArray(16 * 1024)
-                    var total = 0L
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        total += n
-                        if (total > MAX_BUNDLE_BYTES) throw IOException("bundle too large")
-                        output.write(buf, 0, n)
-                    }
-                }
+                dest.outputStream().use { output -> BoundedInput.copy(input, output, MAX_BUNDLE_BYTES, readDeadline()) }
             }
-        } finally {
-            conn.disconnect()
-        }
+        } finally { conn.disconnect() }
     }
 
     private fun sha256(file: File): String {
