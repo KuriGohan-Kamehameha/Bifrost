@@ -1,7 +1,7 @@
 # Bifrost plugin catalogue
 
-The plugin catalogue for [Bifrost](https://github.com/Pollux-MoonBench/Bifrost),
-served from the dedicated **`plugin-catalog`** branch of the upstream repo
+The plugin catalogue for [Bifrost](https://github.com/KuriGohan-Kamehameha/Bifrost),
+served from the dedicated **`plugin-catalog`** branch of the maintained fork
 (content-only, like a `gh-pages` branch — it carries no app source and is never
 deleted when feature branches merge).
 
@@ -18,7 +18,7 @@ up the app→preset mapping, so the effect auto-activates for its target app.
 Bifrost reads the catalogue from:
 
 ```
-https://raw.githubusercontent.com/Pollux-MoonBench/Bifrost/plugin-catalog/catalog.json
+https://raw.githubusercontent.com/KuriGohan-Kamehameha/Bifrost/plugin-catalog/catalog.json
 ```
 
 (Override in the Plugin Store screen for a fork or local server.)
@@ -62,10 +62,14 @@ clients that recorded the old bytes can still re-fetch them.
    ```
 3. Add (or bump) the entry in `catalog.json` with the printed `bundleUrl` +
    `bundleSha256`.
-4. Commit and push to `main`. The store picks it up on next refresh.
+4. Commit and push to `plugin-catalog`. The store picks it up on next refresh.
 
 ## Plugins
 
 | id | name | for |
 |----|------|-----|
 | `fallout4-pipboy` | Fallout 4 Pip-Boy | Fallout 4 companion app |
+
+## Provenance
+
+Continued from [Pollux / MoonBench’s catalogue](https://github.com/Pollux-MoonBench/Bifrost/tree/plugin-catalog), commit `5e73a1ae8953f70ec257367fcbbd7f55fbe01a5e`. Existing plugin authorship, bundle bytes, versions, and SHA-256 checksums are preserved. Only hosting URLs and maintenance instructions changed.
