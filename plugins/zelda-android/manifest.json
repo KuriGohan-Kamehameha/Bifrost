@@ -1,0 +1,59 @@
+{
+  "schema": "bifrost_preset_bundle",
+  "version": 2,
+  "presets": [
+    {
+      "name": "Purah Pad",
+      "animationType": "PIPBOY",
+      "performanceProfile": "HIGH",
+      "color": -16711741,
+      "rightColor": -16711741,
+      "brightness": 255,
+      "speed": 0.5,
+      "smoothness": 0.5,
+      "sensitivity": 0.5,
+      "saturationBoost": 0.0,
+      "useCustomSampling": false,
+      "useSingleColor": true,
+      "breatheWhenCharging": false,
+      "indicateChargingSpeed": false,
+      "flashWhenReady": false,
+      "isAppProfileDefault": true,
+      "ragnarokAccepted": false,
+      "icon": "DISPLAY"
+    },
+    {
+      "name": "Sheikah Slate",
+      "animationType": "PIPBOY",
+      "performanceProfile": "HIGH",
+      "color": -16726785,
+      "rightColor": -16726785,
+      "brightness": 255,
+      "speed": 0.5,
+      "smoothness": 0.5,
+      "sensitivity": 0.5,
+      "saturationBoost": 0.0,
+      "useCustomSampling": false,
+      "useSingleColor": true,
+      "breatheWhenCharging": false,
+      "indicateChargingSpeed": false,
+      "flashWhenReady": false,
+      "isAppProfileDefault": true,
+      "ragnarokAccepted": false,
+      "icon": "DISPLAY"
+    }
+  ],
+  "appProfileMappings": {
+    "com.aure.totk": "Purah Pad",
+    "io.github.kurigohankamehameha.totk": "Purah Pad",
+    "io.github.p1r4n351.botw": "Sheikah Slate"
+  },
+  "livePolicies": {
+    "PIPBOY": {
+      "brightnessCapPercent": 30,
+      "brightnessSource": "BOTTOM_SCREEN",
+      "colorStabilize": true,
+      "duckSeverity": 0.5
+    }
+  }
+}
