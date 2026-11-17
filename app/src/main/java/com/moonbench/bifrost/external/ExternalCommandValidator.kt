@@ -14,19 +14,19 @@ object ExternalCommandValidator {
         UnknownUntilValue,
         MissingProfileName,
         UnknownAction,
+        MissingPresetName,
+        UnknownFunction,
     }
 
     class ValidationException(val kind: ErrorKind) : RuntimeException(kind.name)
 
-    private val mpBlockedEffects = setOf(
-        LedAnimationType.AMBIENT,
-        LedAnimationType.AUDIO_REACTIVE,
-        LedAnimationType.AMBIAURORA,
-    )
+    /** True for every protocol version this build accepts. */
+    fun isSupportedVersion(apiVersion: Int): Boolean =
+        apiVersion in ExternalApi.MIN_API_VERSION..ExternalApi.API_VERSION
 
     fun validate(intent: Intent, callerPackage: String): Result<ExternalApiCommand> {
-        val apiVersion = intent.getIntExtra(ExternalApi.EXTRA_API_VERSION, ExternalApi.API_VERSION)
-        if (apiVersion != ExternalApi.API_VERSION) {
+        val apiVersion = intent.getIntExtra(ExternalApi.EXTRA_API_VERSION, ExternalApi.MIN_API_VERSION)
+        if (!isSupportedVersion(apiVersion)) {
             return Result.failure(ValidationException(ErrorKind.UnsupportedVersion))
         }
 
@@ -34,22 +34,34 @@ object ExternalCommandValidator {
             ?.take(ExternalApi.MAX_REQUEST_ID_LENGTH)
 
         return when (intent.action) {
-            ExternalApi.ACTION_DISPLAY -> parseDisplay(intent, callerPackage, requestId)
+            ExternalApi.ACTION_DISPLAY -> parseDisplay(intent, callerPackage, requestId, apiVersion)
             ExternalApi.ACTION_CLEAR -> Result.success(
-                ExternalApiCommand.Clear(callerPackage, requestId)
+                ExternalApiCommand.Clear(callerPackage, requestId, apiVersion)
             )
             ExternalApi.ACTION_INSTALL_PROFILE -> parseInstall(intent, callerPackage, requestId)
             ExternalApi.ACTION_UNINSTALL_PROFILE -> parseUninstall(intent, callerPackage, requestId)
+            // v2 verbs: a v1 caller doesn't know them, so treat them as unknown there.
+            ExternalApi.ACTION_APPLY_PRESET ->
+                if (apiVersion < 2) Result.failure(ValidationException(ErrorKind.UnsupportedVersion))
+                else parseApplyPreset(intent, callerPackage, requestId, apiVersion)
+            ExternalApi.ACTION_INVOKE ->
+                if (apiVersion < 2) Result.failure(ValidationException(ErrorKind.UnsupportedVersion))
+                else parseInvoke(intent, callerPackage, requestId, apiVersion)
             else -> Result.failure(ValidationException(ErrorKind.UnknownAction))
         }
     }
 
-    private fun parseEffect(intent: Intent): Result<LedAnimationType> {
+    /**
+     * Parse the effect name. The capture-driven effects stay refused for v1
+     * callers (unchanged contract, result -3); a v2 caller gets them through
+     * and the receiver decides by permission and capture state.
+     */
+    private fun parseEffect(intent: Intent, allowReactive: Boolean): Result<LedAnimationType> {
         val effectName = intent.getStringExtra(ExternalApi.EXTRA_EFFECT)
             ?: LedAnimationType.STATIC.name
         val effect = runCatching { LedAnimationType.valueOf(effectName) }.getOrNull()
             ?: return Result.failure(ValidationException(ErrorKind.UnknownEffect))
-        if (effect in mpBlockedEffects) {
+        if (!allowReactive && ExternalCapture.isReactive(effect)) {
             return Result.failure(ValidationException(ErrorKind.EffectRequiresProjection))
         }
         return Result.success(effect)
@@ -65,13 +77,7 @@ object ExternalCommandValidator {
         }
     }
 
-    private fun parseDisplay(
-        intent: Intent,
-        callerPackage: String,
-        requestId: String?
-    ): Result<ExternalApiCommand> {
-        val effect = parseEffect(intent).getOrElse { return Result.failure(it) }
-
+    private fun parseTerminator(intent: Intent): Result<Terminator> {
         val hasDuration = intent.hasExtra(ExternalApi.EXTRA_DURATION_MS)
         val hasUntil = intent.hasExtra(ExternalApi.EXTRA_UNTIL)
         val isIndefinite = intent.getBooleanExtra(ExternalApi.EXTRA_INDEFINITE, false)
@@ -97,6 +103,21 @@ object ExternalCommandValidator {
             }
             else -> Terminator.UntilNextCommand
         }
+        return Result.success(terminator)
+    }
+
+    private fun parsePriority(intent: Intent): Int =
+        intent.getIntExtra(ExternalApi.EXTRA_PRIORITY, 50).coerceIn(0, 100)
+
+    private fun parseDisplay(
+        intent: Intent,
+        callerPackage: String,
+        requestId: String?,
+        apiVersion: Int,
+    ): Result<ExternalApiCommand> {
+        val effect = parseEffect(intent, allowReactive = apiVersion >= 2)
+            .getOrElse { return Result.failure(it) }
+        val terminator = parseTerminator(intent).getOrElse { return Result.failure(it) }
 
         val color = intent.getIntExtra(ExternalApi.EXTRA_COLOR, 0)
         return Result.success(
@@ -111,10 +132,62 @@ object ExternalCommandValidator {
                 smoothness = intent.getFloatExtra(ExternalApi.EXTRA_SMOOTHNESS, 0.5f).coerceIn(0f, 1f),
                 sensitivity = intent.getFloatExtra(ExternalApi.EXTRA_SENSITIVITY, 0.5f).coerceIn(0f, 1f),
                 terminator = terminator,
-                priority = intent.getIntExtra(ExternalApi.EXTRA_PRIORITY, 50).coerceIn(0, 100),
+                priority = parsePriority(intent),
                 phaseSeconds = intent.getFloatExtra(ExternalApi.EXTRA_PHASE_SECONDS, 0f),
                 flickering = intent.getBooleanExtra(ExternalApi.EXTRA_FLICKERING, false),
                 burstWallMs = intent.getLongExtra(ExternalApi.EXTRA_BURST_WALL_MS, 0L),
+                apiVersion = apiVersion,
+            )
+        )
+    }
+
+    private fun parseApplyPreset(
+        intent: Intent,
+        callerPackage: String,
+        requestId: String?,
+        apiVersion: Int,
+    ): Result<ExternalApiCommand> {
+        val presetName = intent.getStringExtra(ExternalApi.EXTRA_PRESET_NAME)?.trim()
+        if (presetName.isNullOrEmpty()) {
+            return Result.failure(ValidationException(ErrorKind.MissingPresetName))
+        }
+        val terminator = parseTerminator(intent).getOrElse { return Result.failure(it) }
+        return Result.success(
+            ExternalApiCommand.ApplyPreset(
+                callerPackage = callerPackage,
+                requestId = requestId,
+                presetName = presetName,
+                terminator = terminator,
+                priority = parsePriority(intent),
+                intensity = if (intent.hasExtra(ExternalApi.EXTRA_INTENSITY)) resolveIntensity(intent) else null,
+                apiVersion = apiVersion,
+            )
+        )
+    }
+
+    private fun parseInvoke(
+        intent: Intent,
+        callerPackage: String,
+        requestId: String?,
+        apiVersion: Int,
+    ): Result<ExternalApiCommand> {
+        val function = ExternalFunction.fromWire(intent.getStringExtra(ExternalApi.EXTRA_FUNCTION))
+            ?: return Result.failure(ValidationException(ErrorKind.UnknownFunction))
+        val terminator = parseTerminator(intent).getOrElse { return Result.failure(it) }
+        val pulseKind = when (intent.getStringExtra(ExternalApi.EXTRA_PULSE_KIND)) {
+            ExternalApi.PULSE_KIND_STATIC -> ExternalApi.PULSE_KIND_STATIC
+            else -> ExternalApi.PULSE_KIND_PULSE
+        }
+        return Result.success(
+            ExternalApiCommand.Invoke(
+                callerPackage = callerPackage,
+                requestId = requestId,
+                function = function,
+                intensity = resolveIntensity(intent),
+                pulseKind = pulseKind,
+                terminator = terminator,
+                priority = parsePriority(intent),
+                apiVersion = apiVersion,
             )
         )
     }
@@ -129,7 +202,8 @@ object ExternalCommandValidator {
             return Result.failure(ValidationException(ErrorKind.MissingProfileName))
         }
 
-        val effect = parseEffect(intent).getOrElse { return Result.failure(it) }
+        // Installing stays limited to the non-capture effects in every version.
+        val effect = parseEffect(intent, allowReactive = false).getOrElse { return Result.failure(it) }
         val color = intent.getIntExtra(ExternalApi.EXTRA_COLOR, 0)
 
         return Result.success(

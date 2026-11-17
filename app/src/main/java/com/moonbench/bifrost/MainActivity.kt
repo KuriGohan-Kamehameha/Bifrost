@@ -108,6 +108,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var lowBatteryAlertValueText: TextView
     private lateinit var disableLowBatteryAlertWhileChargingSwitch: SwitchMaterial
     private lateinit var externalApiSwitch: SwitchMaterial
+    private lateinit var externalApiPrivilegedSwitch: SwitchMaterial
     private lateinit var mediaProjectionManager: MediaProjectionManager
     private lateinit var animationSpinner: Spinner
     private lateinit var profileSpinner: Spinner
@@ -705,6 +706,7 @@ class MainActivity : AppCompatActivity() {
             R.id.disableLowBatteryAlertWhileChargingSwitch
         )
         externalApiSwitch = findViewById(R.id.externalApiSwitch)
+        externalApiPrivilegedSwitch = findViewById(R.id.externalApiPrivilegedSwitch)
         animationSpinner = findViewById(R.id.animationSpinner)
         profileSpinner = findViewById(R.id.profileSpinner)
         presetSpinner = findViewById(R.id.presetSpinner)
@@ -3158,8 +3160,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupExternalApiSwitch() {
         externalApiSwitch.isChecked = ExternalApiGate.isMasterEnabled(prefs)
+        // The presets/reactive switch only means something under the master
+        // switch; it keeps its own value but is greyed out while that is off.
+        externalApiPrivilegedSwitch.isChecked = ExternalApiGate.isPrivilegedEnabled(prefs)
+        externalApiPrivilegedSwitch.isEnabled = externalApiSwitch.isChecked
+        externalApiPrivilegedSwitch.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(ExternalApiGate.PREF_PRIVILEGED_ENABLED, isChecked).apply()
+        }
         externalApiSwitch.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(ExternalApiGate.PREF_ENABLED, isChecked).apply()
+            externalApiPrivilegedSwitch.isEnabled = isChecked
             // Enabling requires the service to survive activity close, so next
             // start picks up the OR'd allowBackgroundRun. If running, restart
             // so the new flag takes effect without waiting for the user to

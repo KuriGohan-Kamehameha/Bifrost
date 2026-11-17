@@ -2,8 +2,8 @@
 
 Bifrost exposes a broadcast-based IPC API that lets other apps on the device drive its LEDs — flashing police lights during a car chase, matching the LED colour to a character's health bar, setting a preset for your launcher wallpaper, reacting to in-game events in real time. It is entirely opt-in: the user must enable **"Allow third-party LED control"** in Bifrost settings before any command is accepted.
 
-> **Minimum Bifrost version:** 1.2.0-beta  
-> **API version:** 1  
+> **Minimum Bifrost version:** 1.2.0-beta (API v2: the first release containing §16)  
+> **API version:** 2 (v1 callers keep working unchanged)  
 > **Min Android SDK for callers:** 33 (same as Bifrost itself)
 
 ---
@@ -25,6 +25,7 @@ Bifrost exposes a broadcast-based IPC API that lets other apps on the device dri
 13. [Recipes](#13--recipes)
 14. [Common mistakes](#14--common-mistakes)
 15. [API versioning](#15--api-versioning)
+16. [API v2 — presets, reactive modes, functions, query](#16--api-v2--presets-reactive-modes-functions-query)
 
 ---
 
@@ -35,7 +36,8 @@ Bifrost exposes a broadcast-based IPC API that lets other apps on the device dri
 | **Commands are broadcasts** | Send an explicit ordered broadcast; read the result code if you need acknowledgement. |
 | **Your override is a removable layer** | Bifrost snapshots its current state when your override starts and restores it automatically when it ends. App-profile switching is paused while an override is active. |
 | **Bifrost must already be running** | You cannot start the foreground service remotely (Android 12+ restriction). If it's not running, commands are silently dropped. Design gracefully for this. |
-| **Rate limit: 8 burst / 4 per second** | Per calling UID. Burst budget refills at 4 tokens/s. |
+| **Rate limit: 8 burst / 4 per second** | Burst budget refills at 4 tokens/s. Callers that identify themselves (§16.1) get their own bucket; otherwise all callers share one. |
+| **Overrides are a 1.5 s lease** | Whatever the terminator, an override whose owner sends nothing for 1.5 s is reverted. Re-send your command (a heartbeat, e.g. every 500 ms–1 s) while you want to keep the LEDs; same-effect / same-preset re-sends are cheap and don't restart the animation. |
 | **Priority arbitrates between apps** | If two apps both try to drive the LEDs, the higher-priority command wins. Each app can always update its own active override regardless of priority. |
 | **No library dependency needed** | Copy the string constants below. The API surface is intentionally minimal. |
 
@@ -71,9 +73,14 @@ object BifrostApi {
     const val ACTION_INSTALL_PROFILE   = "com.moonbench.bifrost.api.ACTION_INSTALL_PROFILE"
     const val ACTION_UNINSTALL_PROFILE = "com.moonbench.bifrost.api.ACTION_UNINSTALL_PROFILE"
     const val ACTION_QUERY_PLUGIN      = "com.moonbench.bifrost.api.ACTION_QUERY_PLUGIN"
+    const val ACTION_PULSE             = "com.moonbench.bifrost.api.ACTION_PULSE"
+    // v2 (§16)
+    const val ACTION_APPLY_PRESET      = "com.moonbench.bifrost.api.ACTION_APPLY_PRESET"
+    const val ACTION_INVOKE            = "com.moonbench.bifrost.api.ACTION_INVOKE"
+    const val ACTION_QUERY             = "com.moonbench.bifrost.api.ACTION_QUERY"
 
     // ── Protocol ──────────────────────────────────────────────────────────
-    const val API_VERSION        = 1
+    const val API_VERSION        = 2             // send 1 if you only use the v1 surface
     const val EXTRA_API_VERSION  = "apiVersion"  // Int — always include
     const val EXTRA_REQUEST_ID   = "requestId"   // String? ≤ 64 chars, echoed in result data
 
@@ -95,6 +102,12 @@ object BifrostApi {
 
     const val UNTIL_NEXT_COMMAND   = "NEXT_COMMAND"
     const val UNTIL_EXPLICIT_CLEAR = "EXPLICIT_CLEAR"
+
+    // ── v2 extras (§16) ───────────────────────────────────────────────────
+    const val EXTRA_CALLER_TOKEN = "callerToken"  // PendingIntent you created — identifies you
+    const val EXTRA_PRESET_NAME  = "presetName"   // String — APPLY_PRESET
+    const val EXTRA_FUNCTION     = "function"     // String — INVOKE: BRIGHTNESS | PULSE | PAUSE | RESUME
+    const val EXTRA_PULSE_KIND   = "pulseKind"    // String — PULSE (default) | STATIC
 
     // ── INSTALL_PROFILE additional extras ────────────────────────────────
     const val EXTRA_PROFILE_NAME              = "profileName"
@@ -121,7 +134,11 @@ object BifrostApi {
     const val RESULT_REJECTED_UNAUTHORIZED = -4  // caller UID could not be resolved
     const val RESULT_REJECTED_RATE_LIMITED = -5  // > 4 commands/s
     const val RESULT_REJECTED_UNKNOWN_ACTION = -6
-    const val RESULT_NOT_FOUND             =  1  // plugin query miss
+    const val RESULT_NOT_FOUND             =  1  // plugin query miss / unknown preset / no override to retune
+    // v2 only
+    const val RESULT_REJECTED_NOT_PERMITTED       = -7  // user hasn't allowed presets/reactive modes for you
+    const val RESULT_REJECTED_CAPTURE_UNAVAILABLE = -8  // reactive mode needs capture Bifrost doesn't hold
+    const val RESULT_REJECTED_SERVICE_NOT_RUNNING = -9  // nothing shown: Bifrost's LED service is off
 }
 ```
 
@@ -198,7 +215,7 @@ You do **not** need to add the `<queries>` block just to send broadcasts — And
 
 ## 6 — Available effects
 
-Pass one of these strings as `EXTRA_EFFECT`. Effects requiring screen capture (`AMBIENT`, `AUDIO_REACTIVE`, `AMBIAURORA`) are blocked in the external API — they need a MediaProjection consent flow that only Bifrost's own UI can trigger.
+Pass one of these strings as `EXTRA_EFFECT`. Effects requiring screen capture (`AMBIENT`, `AUDIO_REACTIVE`, `AMBIAURORA`) are refused with `-3` for `apiVersion = 1`. With `apiVersion = 2` they are available when the user allows it and Bifrost already holds the capture they need — see §16.3.
 
 | Effect name | Color | R/L independent | Speed | Smoothness | Sensitivity | Notes |
 |---|---|---|---|---|---|---|
@@ -334,7 +351,10 @@ These are only returned when you use `sendOrderedBroadcast`. Plain `sendBroadcas
 | `RESULT_REJECTED_UNAUTHORIZED` | -4 | Caller UID couldn't be resolved to a package. Should not happen under normal circumstances. |
 | `RESULT_REJECTED_RATE_LIMITED` | -5 | More than ~4 commands/second from your UID. Back off and retry. |
 | `RESULT_REJECTED_UNKNOWN_ACTION` | -6 | Action string not recognised. Check for typos. |
-| `RESULT_NOT_FOUND` | 1 | Plugin query miss. |
+| `RESULT_NOT_FOUND` | 1 | Plugin query miss; (v2) no preset with that name; (v2) `BRIGHTNESS` with no override of yours running. |
+| `RESULT_REJECTED_NOT_PERMITTED` | -7 | (v2) Presets / reactive modes aren't allowed for your app (§16.2). |
+| `RESULT_REJECTED_CAPTURE_UNAVAILABLE` | -8 | (v2) The preset or effect needs screen or audio capture that Bifrost doesn't hold right now (§16.3). |
+| `RESULT_REJECTED_SERVICE_NOT_RUNNING` | -9 | (v2) Bifrost's LED service isn't running; nothing was shown. v1 callers get `0` and the command is dropped, as before. |
 
 `resultData` contains your `requestId` string when the result is `RESULT_ACCEPTED`, useful for correlating asynchronous acknowledgements.
 
@@ -651,6 +671,126 @@ Bifrost won't turn the LEDs off — it sets them to the colour you specify. `Col
 
 ## 15 — API versioning
 
-Always include `EXTRA_API_VERSION = 1`. If a future Bifrost release introduces a breaking change, it will increment `API_VERSION` and reject older callers with `RESULT_REJECTED_VERSION`. This makes version skew immediately visible rather than silently producing wrong behaviour.
+Always include `EXTRA_API_VERSION`. Bifrost accepts every version from `MIN_API_VERSION` (1) to `API_VERSION` (2) and serves each with its own rules, so a v1 caller sees exactly the v1 behaviour. A version outside that range is rejected with `RESULT_REJECTED_VERSION`, which is also how you feature-detect: an older Bifrost answers `-2` to `apiVersion = 2` (send `ACTION_QUERY` ordered once at start-up and fall back to v1 on `-2`).
+
+| Version | Adds |
+|---|---|
+| 1 | `DISPLAY`, `CLEAR`, `PULSE`, `INSTALL_PROFILE`, `UNINSTALL_PROFILE`, `QUERY_PLUGIN` |
+| 2 | `APPLY_PRESET`, `INVOKE`, `QUERY`, capture effects in `DISPLAY`, `callerToken`, result codes -7/-8/-9 |
 
 When targeting a new API version, check the Bifrost changelog for migration notes and update your constants. The stable contract is the string values in `BifrostApi` — the Kotlin object itself is just a convenient copy.
+
+---
+
+## 16 — API v2 — presets, reactive modes, functions, query
+
+Everything here needs `EXTRA_API_VERSION = 2`. All v1 rules still apply: the master switch, the rate limit, priority, the 1.5 s lease and the revert-to-what-was-running-before when your override ends.
+
+### 16.1 — Identify your app (`callerToken`)
+
+Inside a broadcast receiver Android doesn't say who sent the broadcast, so Bifrost can't tell callers apart from the broadcast alone. Attach a `PendingIntent` that **your** app created; Bifrost only reads its creator package (which Android vouches for) and never sends it.
+
+```kotlin
+val token = PendingIntent.getBroadcast(
+    context, 0, Intent("${context.packageName}.BIFROST_ID").setPackage(context.packageName),
+    PendingIntent.FLAG_IMMUTABLE)
+intent.putExtra(BifrostApi.EXTRA_CALLER_TOKEN, token)
+```
+
+On Android 14+ you can instead send with `BroadcastOptions.makeBasic().setShareIdentityEnabled(true)`. Send the token on **every** command (including `CLEAR` and heartbeats): your override is owned by the identity it was started with, and a `CLEAR` without the token can't end an override started with it. The token is required for plugin grants (§16.2) and gives you your own rate-limit bucket.
+
+### 16.2 — Who may use presets and reactive modes
+
+`ACTION_APPLY_PRESET` and the capture effects in `ACTION_DISPLAY` are refused with `-7` unless one of these holds (in addition to "Allow third-party LED control"):
+
+1. The user turned on **"Let apps start presets and reactive modes"** (Bifrost settings, under the third-party switch; off by default). This allows every app that holds the permission.
+2. A plugin the user installed from the Plugin Store grants it to your package, and you identified yourself (§16.1). The plugin's `.bfplugin` `manifest.json` declares it:
+
+```json
+"externalAccess": {
+  "com.example.game": {
+    "presets": ["Cutscene Aurora"],
+    "effects": ["AMBIENT", "AUDIO_REACTIVE"]
+  }
+}
+```
+
+`"*"` means any preset / any effect. Uninstalling or updating the plugin removes or replaces its grant. Plain effects (`STATIC`, `PIPBOY`, …) and `ACTION_INVOKE` need no grant.
+
+### 16.3 — Capture (reactive) effects
+
+| Effect | Needs | Available when |
+|---|---|---|
+| `AMBIENT` | screen | The user prefers MediaProjection and Bifrost has screen capture (below); or the user chose accessibility capture and it is on |
+| `AUDIO_REACTIVE`, `AMBIAURORA` | MediaProjection (screen + audio playback) | Bifrost has screen capture (below) and the microphone/audio permission |
+
+"Has screen capture" means a capture session is running, or the user granted consent that Bifrost hasn't used yet. Consent is single-use: the first capture effect started uses it, later ones reuse the running session, and once that session ends (the user revokes it, or the service stops) new consent from Bifrost's own UI is needed.
+
+Your app can't trigger the consent prompt. If what's needed is missing the command is refused with `-8` and nothing changes; `ACTION_QUERY` tells you in advance (`available`).
+
+### 16.4 — `ACTION_APPLY_PRESET`
+
+Runs one of the user's saved presets (all its settings: effect, colours, speed, profile, sampling, …) as your override, then reverts as usual.
+
+| Extra | Type | |
+|---|---|---|
+| `presetName` | String | Exact name, as listed by `ACTION_QUERY`. Unknown → `1` (`RESULT_NOT_FOUND`). |
+| `priority` | Int 0–100 | As `DISPLAY`. |
+| `durationMs` / `until` / `indefinite` | | As `DISPLAY` (one at most). The lease still applies: heartbeat. |
+| `intensity` (+`intensityScale`) | Int | Optional brightness instead of the preset's own. |
+
+Re-sending the same `presetName` while it runs only renews the lease (and applies a changed `intensity`); it does not restart the effect.
+
+```kotlin
+sendToBifrostForResult(context, BifrostApi.ACTION_APPLY_PRESET, {
+    putExtra(BifrostApi.EXTRA_CALLER_TOKEN, token)
+    putExtra(BifrostApi.EXTRA_PRESET_NAME, "Cutscene Aurora")
+    putExtra(BifrostApi.EXTRA_PRIORITY, 60)
+    putExtra(BifrostApi.EXTRA_UNTIL, BifrostApi.UNTIL_EXPLICIT_CLEAR)
+}) { code, _ -> if (code < 0) fallBackToYourOwnLook(code) }
+```
+
+### 16.5 — `ACTION_INVOKE`
+
+`EXTRA_FUNCTION` is one of:
+
+| Function | Extras | Effect |
+|---|---|---|
+| `BRIGHTNESS` | `intensity` (+`intensityScale`) | Changes the brightness of **your** running override in place. `1` if you have none. |
+| `PULSE` | `pulseKind` (`PULSE`/`STATIC`) | Same as `ACTION_PULSE`, but rate limited. |
+| `PAUSE` | terminator, `priority` | LEDs dark, as an ordinary override (lease applies). |
+| `RESUME` | — | Same as `ACTION_CLEAR`. |
+
+### 16.6 — `ACTION_QUERY`
+
+Send it **ordered**; `resultData` is JSON. With the master switch off the result code is `-1` and the JSON holds only `apiVersion`, `minApiVersion` and `"enabled": false`.
+
+```json
+{
+  "apiVersion": 2, "minApiVersion": 1, "enabled": true,
+  "serviceRunning": true,
+  "caller": "com.example.game",
+  "privileged": false,
+  "capture": { "projection": false, "audio": true, "accessibility": true },
+  "presets": [ { "name": "Cutscene Aurora", "effect": "AMBIENT", "allowed": true, "available": true },
+               { "name": "Party", "effect": "AUDIO_REACTIVE", "owner": "plugin:x", "allowed": false, "available": false } ],
+  "effects": [ { "name": "AMBIENT", "capture": "SCREEN", "allowed": true, "available": true }, ... ],
+  "functions": [ "BRIGHTNESS", "PULSE", "PAUSE", "RESUME" ]
+}
+```
+
+`caller` is `null` unless you identified yourself. `allowed` is the permission (§16.2), `available` the capture state (§16.3); offer a choice only when both are true. Presets are listed in the user's order, at most 200.
+
+### 16.7 — Recipe: hand the LEDs to the user's reactive preset during a cutscene
+
+```kotlin
+// On cutscene start (debounced), and then every ~500 ms while it lasts:
+send(ACTION_APPLY_PRESET) {
+    putExtra(EXTRA_CALLER_TOKEN, token)
+    putExtra(EXTRA_PRESET_NAME, userChoice)        // picked from ACTION_QUERY in your settings
+    putExtra(EXTRA_PRIORITY, 60)
+    putExtra(EXTRA_UNTIL, UNTIL_EXPLICIT_CLEAR)
+}
+// On cutscene end: resume your own feed (DISPLAY, same token) — it replaces the preset
+// override in one step — or CLEAR (same token) to give the LEDs back to Bifrost.
+```

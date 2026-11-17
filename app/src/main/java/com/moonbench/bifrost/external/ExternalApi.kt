@@ -24,7 +24,20 @@ object ExternalApi {
     const val PULSE_KIND_PULSE = "PULSE"
     const val PULSE_KIND_STATIC = "STATIC"
 
-    const val API_VERSION = 1
+    // ── API v2 (additive; v1 callers are served exactly as before) ──────────
+    // Apply a saved preset by name as a removable override (same lease,
+    // priority and revert rules as ACTION_DISPLAY). Privileged: see below.
+    const val ACTION_APPLY_PRESET = "com.moonbench.bifrost.api.ACTION_APPLY_PRESET"
+    // Small verbs on the caller's own override (EXTRA_FUNCTION).
+    const val ACTION_INVOKE = "com.moonbench.bifrost.api.ACTION_INVOKE"
+    // Ordered broadcast: resultData is a JSON description of what this caller
+    // may use (presets, effects, functions, capture state). Read-only.
+    const val ACTION_QUERY = "com.moonbench.bifrost.api.ACTION_QUERY"
+
+    /** Highest protocol version this build speaks. */
+    const val API_VERSION = 2
+    /** Oldest protocol version still accepted (v1 behaviour is unchanged). */
+    const val MIN_API_VERSION = 1
 
     const val EXTRA_API_VERSION = "apiVersion"
     const val EXTRA_EFFECT = "effect"
@@ -64,6 +77,22 @@ object ExternalApi {
     const val EXTRA_CPU_WARM_COLOR = "cpuWarmColor"
     const val EXTRA_CPU_HOT_COLOR = "cpuHotColor"
 
+    // v2: who is calling. A PendingIntent the caller created (any target, e.g.
+    // PendingIntent.getBroadcast(ctx, 0, Intent(pkg + ".BIFROST"), FLAG_IMMUTABLE));
+    // Bifrost reads only its creator package, which Android vouches for. A plain
+    // broadcast's sender can't be identified inside a receiver, so per-app grants
+    // (plugin `externalAccess`) need this, or Android 14 share-identity.
+    const val EXTRA_CALLER_TOKEN = "callerToken"
+    // v2: ACTION_APPLY_PRESET — the preset's exact name (as listed by ACTION_QUERY).
+    const val EXTRA_PRESET_NAME = "presetName"
+    // v2: ACTION_INVOKE — one of FUNCTION_*.
+    const val EXTRA_FUNCTION = "function"
+
+    const val FUNCTION_BRIGHTNESS = "BRIGHTNESS"   // EXTRA_INTENSITY (+scale) on your active override
+    const val FUNCTION_PULSE = "PULSE"             // same as ACTION_PULSE (EXTRA_PULSE_KIND), rate limited
+    const val FUNCTION_PAUSE = "PAUSE"             // LEDs dark as an override (terminator + priority apply)
+    const val FUNCTION_RESUME = "RESUME"           // same as ACTION_CLEAR
+
     const val UNTIL_NEXT_COMMAND = "NEXT_COMMAND"
     const val UNTIL_EXPLICIT_CLEAR = "EXPLICIT_CLEAR"
 
@@ -75,6 +104,13 @@ object ExternalApi {
     const val RESULT_REJECTED_RATE_LIMITED = -5
     const val RESULT_REJECTED_UNKNOWN_ACTION = -6
     const val RESULT_NOT_FOUND = 1
+    // v2 only (a v1 caller still gets the v1 codes):
+    /** The user hasn't allowed this caller to start presets / reactive modes. */
+    const val RESULT_REJECTED_NOT_PERMITTED = -7
+    /** Reactive mode needs screen/audio capture that Bifrost doesn't hold right now. */
+    const val RESULT_REJECTED_CAPTURE_UNAVAILABLE = -8
+    /** Bifrost's LED service isn't running, so nothing was shown. */
+    const val RESULT_REJECTED_SERVICE_NOT_RUNNING = -9
 
     const val MAX_DURATION_MS = 600_000L
     const val MAX_REQUEST_ID_LENGTH = 64
