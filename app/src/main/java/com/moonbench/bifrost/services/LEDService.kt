@@ -61,6 +61,8 @@ import com.moonbench.bifrost.animations.StaticAnimation
 import com.moonbench.bifrost.animations.StrobeAnimation
 import com.moonbench.bifrost.external.ExternalOverrideState
 import com.moonbench.bifrost.external.Terminator
+import com.moonbench.bifrost.revive.ReviveStore
+import com.moonbench.bifrost.revive.ServiceRevive
 import com.moonbench.bifrost.tools.Crossfade
 import com.moonbench.bifrost.tools.LedController
 import com.moonbench.bifrost.tools.PerformanceProfile
@@ -371,6 +373,18 @@ class LEDService : Service() {
         getSharedPreferences("bifrost_prefs", MODE_PRIVATE)
     }
 
+    private val reviveStore by lazy { ReviveStore(this) }
+
+    // Set when a revive could not be promoted to the foreground and has been
+    // handed to the alarm path: this stop must not clear "should be running".
+    private var keepReviveIntentOnDestroy = false
+
+    // Decoded once: every foreground-notification refresh used to decode the
+    // launcher artwork into a fresh bitmap.
+    private val notificationLargeIcon by lazy {
+        BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher_foreground)
+    }
+
     private val appProfileManager by lazy {
         AppProfileManager(prefs)
     }
@@ -417,8 +431,9 @@ class LEDService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) {
-            stopSelf()
-            return START_NOT_STICKY
+            // Android restarting the sticky service after its process died
+            // (low-memory kill, crash). Restore the saved request, or stop.
+            return handleSystemRestart(flags, startId)
         }
 
         if (intent.action == ACTION_STOP) {
@@ -428,7 +443,8 @@ class LEDService : Service() {
 
         if (intent.action == ACTION_UPDATE_PARAMS) {
             handleUpdateParams(intent)
-            return START_NOT_STICKY
+            if (isRunning) ServiceRevive.onParamsUpdated(this, intent)
+            return restartMode()
         }
 
         if (intent.action == ACTION_FORCE_APP_PROFILE_RESOLUTION) {
@@ -436,27 +452,32 @@ class LEDService : Service() {
             if (isRunning) {
                 checkAutoProfileSwitch()
             }
-            return START_NOT_STICKY
+            return restartMode()
         }
 
         if (intent.action == ACTION_SUPPLY_PROJECTION) {
             handleSupplyProjection(intent)
-            return START_NOT_STICKY
+            return restartMode()
         }
 
         if (intent.action == ACTION_EXTERNAL_DISPLAY) {
             handleExternalDisplay(intent)
-            return START_NOT_STICKY
+            return restartMode()
         }
 
         if (intent.action == ACTION_EXTERNAL_CLEAR) {
             handleExternalClear(intent.getStringExtra(EXTRA_EXTERNAL_CALLER_PACKAGE))
-            return START_NOT_STICKY
+            return restartMode()
         }
 
         if (intent.action == ACTION_EXTERNAL_PULSE) {
             handleExternalPulse(intent.getStringExtra(EXTRA_EXTERNAL_PULSE_KIND))
-            return START_NOT_STICKY
+            return restartMode()
+        }
+
+        if (ServiceRevive.isReviveIntent(intent) && isRunning) {
+            // The sticky restart and the safety-net alarm raced; one revive is enough.
+            return restartMode()
         }
 
         allowBackgroundRun = intent.getBooleanExtra(EXTRA_ALLOW_BACKGROUND_RUN, allowBackgroundRun)
@@ -486,9 +507,21 @@ class LEDService : Service() {
         )
 
         acceptProjectionGrant(intent)
-        startForegroundSafely(createNotification())
+        try {
+            startForegroundSafely(createNotification())
+        } catch (e: IllegalStateException) {
+            // ForegroundServiceStartNotAllowedException: Android 12+ refused to
+            // promote a background revive. Hand it to the exempt alarm path.
+            if (!ServiceRevive.isReviveIntent(intent)) throw e
+            keepReviveIntentOnDestroy = true
+            ServiceRevive.onReviveBlocked(this, intent, e)
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         isRunning = true
+        keepReviveIntentOnDestroy = false
+        ServiceRevive.onServiceStarted(this, intent)
         BifrostTileService.refreshFrom(this)
 
         val animationTypeName = intent.getStringExtra("animationType")
@@ -555,7 +588,27 @@ class LEDService : Service() {
             restartAnimationForCurrentState(force = true)
         }
 
-        return START_NOT_STICKY
+        return restartMode()
+    }
+
+    /**
+     * Sticky while the service is meant to run, so Android restarts it after a
+     * low-memory kill or crash; not sticky once it is stopping or the user has
+     * turned automatic revive off.
+     */
+    private fun restartMode(): Int =
+        if (isRunning && !isStopping.get() && reviveStore.isEnabled) START_STICKY else START_NOT_STICKY
+
+    private fun handleSystemRestart(flags: Int, startId: Int): Int {
+        if (isRunning) return restartMode()
+        val reviveIntent = ServiceRevive.prepareRevive(this, running = false, source = ServiceRevive.SOURCE_STICKY)
+        if (reviveIntent == null) {
+            Log.i(TAG, "handleSystemRestart: not reviving")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        Log.i(TAG, "handleSystemRestart: reviving the saved preset")
+        return onStartCommand(reviveIntent, flags, startId)
     }
 
     private fun handleUpdateParams(intent: Intent) {
@@ -1187,6 +1240,11 @@ class LEDService : Service() {
         // Destruction must be synchronous. Delayed teardown can otherwise revoke
         // a replacement service's capture or overwrite its shared running state.
         isStopping.set(true)
+        if (!keepReviveIntentOnDestroy) {
+            // Reaching onDestroy means an orderly stop (Stop action, app toggle,
+            // tile, schedule). A killed or crashed process never gets here.
+            runCatching { ServiceRevive.onServiceStopped(this) }
+        }
         handler.removeCallbacksAndMessages(null)
         clearPendingCallbacks()
         isRunning = false
@@ -1219,6 +1277,7 @@ class LEDService : Service() {
     private fun cleanupAndStop() {
         if (isStopping.getAndSet(true)) return
         Log.d(TAG, "cleanupAndStop: STOPPING SERVICE")
+        runCatching { ServiceRevive.onServiceStopped(this) }
 
         try {
             handler.removeCallbacks(activityCheckRunnable)
@@ -1307,7 +1366,7 @@ class LEDService : Service() {
             .setContentText("Tap to tune")
             .setSubText(resolveNotificationSubText())
             .setSmallIcon(R.drawable.ic_notification_small)
-            .setLargeIcon(BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher_foreground))
+            .setLargeIcon(notificationLargeIcon)
             .setContentIntent(mainPendingIntent)
             .addAction(android.R.drawable.ic_delete, "Stop", stopPendingIntent)
             .setOnlyAlertOnce(true)
@@ -1790,7 +1849,7 @@ class LEDService : Service() {
 
         val notification = NotificationCompat.Builder(this, PROJECTION_PROMPT_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_small)
-            .setLargeIcon(BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher_foreground))
+            .setLargeIcon(notificationLargeIcon)
             .setContentTitle("Capture permission needed")
             .setContentText("Tap to grant permission so Bifrost can run the assigned animation.")
             .setContentIntent(pendingIntent)

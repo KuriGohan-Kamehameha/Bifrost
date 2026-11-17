@@ -73,6 +73,7 @@ import com.moonbench.bifrost.services.LEDService
 import com.moonbench.bifrost.services.LiveWallpaperSettingsManager
 import com.moonbench.bifrost.services.ServiceController
 import com.moonbench.bifrost.services.VideoLiveWallpaperService
+import com.moonbench.bifrost.revive.ReviveSettingsUi
 import com.moonbench.bifrost.tools.CrashReporter
 import com.moonbench.bifrost.tools.DeviceInfo
 import com.moonbench.bifrost.tools.PerformanceProfile
@@ -792,6 +793,11 @@ class MainActivity : AppCompatActivity() {
         appProfileManager = AppProfileManager(prefs)
         setupAppProfileFeature()
         setupAutoStartupSwitch()
+        ReviveSettingsUi.bind(
+            this,
+            findViewById(R.id.reviveAfterCrashSwitch),
+            findViewById(R.id.reviveHistoryButton)
+        )
         setupPluggedBatteryOverrideSwitch()
         setupPersistentNotificationSwitch()
         setupAdaptiveBrightnessSwitch()
