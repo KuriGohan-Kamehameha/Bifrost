@@ -77,4 +77,44 @@
     <string name="accessibility_service_description">Allows Bifrost to capture display frames for LED effects.</string>
     <string name="live_wallpaper_description">Video live wallpaper.</string>
 
+    <!-- Setup suggestions: Switch emulator profile, Cocoon match, Thor Purple -->
+    <string name="suggest_yes">Yes</string>
+    <string name="suggest_not_now">Not now</string>
+    <string name="suggest_dont_ask">Don\'t ask again</string>
+    <string name="suggest_cancel">Cancel</string>
+    <string name="suggest_remove">Remove</string>
+    <string name="switch_profile_title">SWITCH EMULATORS FOUND</string>
+    <string name="switch_profile_subtitle">Switch emulators found: %1$s</string>
+    <string name="switch_profile_body_create">Set up a Switch profile? Bifrost will add a \"%1$s\" preset (left stick neon blue, right stick neon red, like the original Joy-Con) and play it automatically while these emulators are open.</string>
+    <string name="switch_profile_body_update">Set up a Switch profile? Bifrost will use your existing \"%1$s\" preset (unchanged) for these emulators while they are open.</string>
+    <string name="switch_profile_body_enable">\n\nApp profile switching will be turned on (it needs usage access).</string>
+    <string name="switch_profile_body_conflicts">\n\nAlready assigned to another preset: %1$s. Bifrost will ask before changing these.</string>
+    <string name="switch_profile_nothing">Switch profile is already set up for: %1$s</string>
+    <string name="switch_profile_none_found">No supported Switch emulator is installed.</string>
+    <string name="switch_profile_conflict_title">REASSIGN EMULATORS?</string>
+    <string name="switch_profile_conflict_body">These emulators are assigned to your own presets:\n%1$s\n\nUse \"%2$s\" for them instead?</string>
+    <string name="switch_profile_conflict_confirm">Use Switch profile</string>
+    <string name="switch_profile_conflict_keep">Keep mine</string>
+    <string name="switch_profile_done">Switch profile ready: %1$d emulator(s) mapped to \"%2$s\"</string>
+    <string name="switch_profile_settings_button">Set up Switch emulator profile</string>
+    <string name="switch_profile_remove_button">Remove Switch profile</string>
+    <string name="switch_profile_remove_title">REMOVE SWITCH PROFILE?</string>
+    <string name="switch_profile_remove_body">Deletes the \"%1$s\" preset and the app assignments that use it. Your other presets and assignments stay.</string>
+    <string name="switch_profile_removed">Switch profile removed</string>
+    <string name="cocoon_match_title">MATCH COCOON\'S LOOK?</string>
+    <string name="cocoon_match_subtitle">Cocoon launcher detected</string>
+    <string name="cocoon_match_body">Cocoon doesn\'t share its theme with other apps, so Bifrost can match the system colour palette Android derives from your wallpaper instead.\n\nBifrost will add a \"Cocoon Match\" preset in your accent colour (used when no app profile matches, unless you already chose a fallback) and switch its own look to the System palette theme. Both follow your theme when it changes. Turn it off anytime in Settings.</string>
+    <string name="cocoon_match_switch_label">Match Cocoon theme</string>
+    <string name="cocoon_match_switch_subtitle">Neutral preset and app colours follow the system palette</string>
+    <string name="cocoon_match_not_installed">Cocoon launcher not installed</string>
+    <string name="cocoon_match_unavailable">Couldn\'t read a theme palette; nothing was changed</string>
+    <string name="cocoon_match_enabled">Bifrost now matches your theme</string>
+    <string name="thor_purple_apply_button">Apply Thor Purple theme</string>
+    <string name="thor_purple_remove_button">Remove Thor Purple theme</string>
+    <string name="thor_purple_title">THOR PURPLE?</string>
+    <string name="thor_purple_body">Adds a \"Thor Purple\" preset and switches Bifrost to the OLED Purple look. Bifrost can\'t tell your Thor\'s shell colour from the hardware, so this is a manual choice.</string>
+    <string name="thor_purple_applied">Thor Purple applied</string>
+    <string name="thor_purple_removed">Thor Purple removed</string>
+    <string name="ui_theme_system_palette">System palette</string>
+
 </resources>
