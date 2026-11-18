@@ -245,11 +245,11 @@ https://github.com/KuriGohan-Kamehameha
 
 ---
 
-# ☕ Thank the Original Creator
+# ☕ Support
 
-Pollux / MoonBench created Bifrost. The following donation link supports **Pollux**, not maintenance of this fork:
+Pollux / MoonBench created Bifrost. If this fork is useful to you, donations to its maintenance are gratefully accepted:
 
-👉 https://ko-fi.com/pollux_moonbench
+- Bitcoin: `bc1q4a3lqcg87rvw7vxulausdqhhuwkwwa6w6v4mxx`
 
 Thank you! ❤️
 
