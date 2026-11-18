@@ -21,14 +21,14 @@
       "author": "KuriGohan-Kamehameha / P1R4N351",
       "version": 1,
       "versionName": "1.0",
-      "description": "Sync your stick LEDs to the second screen of the native Zelda ports for Android: the teal Purah Pad in TotK Native and the blue Sheikah Slate in BotW Native, breathing like the tablet, a dip when you touch it or open the menu, a red stutter when hearts run low. Installs both presets and auto-activates the right one whenever either game is in front. Tops stick brightness at 30% and tracks the bottom-screen brightness. The game apps send the live feed by themselves once \"Allow third-party LED control\" is on. Compatible apps: TotK Native (fork) https://github.com/KuriGohan-Kamehameha/totk-android/releases and BotW Native https://github.com/P1R4N351/botw-android/releases",
+      "description": "Sync your stick LEDs to the second screen of the native Zelda ports for Android: the teal Purah Pad in TotK Native and the blue Sheikah Slate in BotW Native, breathing like the tablet, a dip when you touch it or open the menu, a red stutter when hearts run low. Installs both presets and auto-activates the right one whenever either game is in front. Tops stick brightness at 30% and tracks the bottom-screen brightness. The game apps send the live feed by themselves once \"Allow third-party LED control\" is on. Compatible apps: TotK Native (fork) https://github.com/P1R4N351/totk-android/releases and BotW Native https://github.com/P1R4N351/botw-android/releases",
       "icon": "DISPLAY",
       "targetPackage": "io.github.p1r4n351.botw",
       "minBifrostVersionCode": 11,
       "bundleUrl": "https://raw.githubusercontent.com/KuriGohan-Kamehameha/Bifrost/plugin-catalog/plugins/zelda-android/zelda-android-1.bfplugin",
       "bundleSha256": "51dc2750a075a5890e78232836dbb061621dc4b8ad34299e699f551e88bce2eb",
       "links": {
-        "TotK Native (fork)": "https://github.com/KuriGohan-Kamehameha/totk-android/releases",
+        "TotK Native (fork)": "https://github.com/P1R4N351/totk-android/releases",
         "BotW Native": "https://github.com/P1R4N351/botw-android/releases",
         "Source (both apps)": "https://github.com/P1R4N351/botw-android"
       }
