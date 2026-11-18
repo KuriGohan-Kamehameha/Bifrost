@@ -93,6 +93,10 @@ import java.io.File
 import com.moonbench.bifrost.plugins.PluginLaunchManager
 import com.moonbench.bifrost.plugins.PluginStoreActivity
 import com.moonbench.bifrost.schedule.ScheduleActivity
+import com.moonbench.bifrost.suggest.CocoonTheme
+import com.moonbench.bifrost.suggest.SuggestionStore
+import com.moonbench.bifrost.suggest.SwitchEmulators
+import com.moonbench.bifrost.suggest.SwitchProfilePlan
 
 class MainActivity : AppCompatActivity() {
 
@@ -355,7 +359,7 @@ class MainActivity : AppCompatActivity() {
     private val colorPickerDialog = ColorPickerDialog()
     private val ragnarokWarningDialog = RagnarokWarningDialog()
     private lateinit var appProfileManager: AppProfileManager
-    private val builtInThemes = listOf(
+    private val staticUiThemes = listOf(
         UiTheme(
             id = "classic",
             label = "Classic",
@@ -409,7 +413,11 @@ class MainActivity : AppCompatActivity() {
             )
         )
     )
-    private var selectedUiTheme: UiTheme = builtInThemes.first()
+    /** Built-in looks plus "System palette" (Material You), rebuilt on each access. */
+    private val builtInThemes: List<UiTheme>
+        get() = staticUiThemes + systemPaletteUiTheme()
+    private var selectedUiTheme: UiTheme = staticUiThemes.first()
+    private var isSyncingCocoonSwitch = false
 
     private val launchNotificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
@@ -800,6 +808,7 @@ class MainActivity : AppCompatActivity() {
         setupDisableLowBatteryAlertWhileChargingSwitch()
         setupExternalApiSwitch()
         setupPluginStore()
+        setupSuggestionSettings()
         setupThorScreenPreference()
         setupSettingsTabs()
         setupThemeFeature()
@@ -2358,9 +2367,15 @@ class MainActivity : AppCompatActivity() {
                 enableRainbowBackground(LEDService.isRunning)
             }
 
+            SuggestionStore.refreshCocoonMatch(this, prefs)
+            if (selectedUiTheme.id == CocoonTheme.UI_THEME_ID) applyThemeFromPrefs()
+
             if (::presetController.isInitialized) {
                 presetController.reloadFromPrefs()
             }
+
+            updateSuggestionSettingsUi()
+            maybeOfferSuggestions()
 
             if (prefs.getBoolean(PREF_LIVE_WALLPAPER_RESTORE_SETTINGS, false)) {
                 prefs.edit().putBoolean(PREF_LIVE_WALLPAPER_RESTORE_SETTINGS, false).apply()
@@ -4409,6 +4424,277 @@ class MainActivity : AppCompatActivity() {
                 prefs.edit().putBoolean(PREF_APP_PROFILE_INFO_SHOWN, true).apply()
             }
         )
+    }
+
+    // ---- Setup suggestions: Switch emulator profile, Cocoon match, Thor Purple ----
+
+    private fun systemPaletteUiTheme(): UiTheme {
+        val classic = staticUiThemes.first()
+        val label = getString(R.string.ui_theme_system_palette)
+        val palette = CocoonTheme.readSystemPalette(this)
+            ?: return classic.copy(id = CocoonTheme.UI_THEME_ID, label = label)
+        val hsv = FloatArray(3)
+        Color.colorToHSV(palette.accent, hsv)
+        return UiTheme(
+            id = CocoonTheme.UI_THEME_ID,
+            label = label,
+            backgroundColor = palette.background,
+            cardColor = palette.card,
+            surfaceColor = palette.surface,
+            textColor = palette.text,
+            accentColor = palette.accent,
+            accentLightColor = palette.accentLight,
+            headerPalette = classic.headerPalette.copy(
+                introHueStart = (hsv[0] + 328f) % 360f,
+                introHueSpan = 64f,
+                settleHueStart = (hsv[0] + 336f) % 360f,
+                settleHueSpan = 48f,
+                settleHueWobbleAmplitude = 5f
+            )
+        )
+    }
+
+    private fun applyThemeFromPrefs() {
+        if (!::themeSpinner.isInitialized) return
+        val themes = builtInThemes
+        val id = prefs.getString(PREF_SELECTED_UI_THEME, themes.first().id)
+        val index = themes.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: 0
+        if (themeSpinner.selectedItemPosition != index) themeSpinner.setSelection(index, false)
+        applySelectedTheme(themes[index], persistSelection = false)
+    }
+
+    private fun setupSuggestionSettings() {
+        findViewById<View>(R.id.switchProfileButton)?.setOnClickListener {
+            offerSwitchProfile(fromSettings = true)
+        }
+        findViewById<View>(R.id.switchProfileRemoveButton)?.setOnClickListener {
+            confirmRemoveSwitchProfile()
+        }
+        findViewById<SwitchMaterial>(R.id.cocoonMatchSwitch)?.setOnCheckedChangeListener { _, isChecked ->
+            if (isSyncingCocoonSwitch) return@setOnCheckedChangeListener
+            setCocoonMatch(isChecked)
+        }
+        findViewById<View>(R.id.thorPurpleButton)?.setOnClickListener { toggleThorPurple() }
+        updateSuggestionSettingsUi()
+    }
+
+    private fun updateSuggestionSettingsUi() {
+        findViewById<View>(R.id.switchProfileRemoveButton)?.visibility =
+            if (SuggestionStore.hasSwitchProfile(prefs)) View.VISIBLE else View.GONE
+        val cocoonEnabled = SuggestionStore.cocoonMatchEnabled(prefs)
+        val cocoonAvailable = cocoonEnabled || CocoonTheme.isInstalled(this)
+        findViewById<SwitchMaterial>(R.id.cocoonMatchSwitch)?.let { toggle ->
+            isSyncingCocoonSwitch = true
+            toggle.isChecked = cocoonEnabled
+            toggle.isEnabled = cocoonAvailable
+            isSyncingCocoonSwitch = false
+        }
+        findViewById<TextView>(R.id.cocoonMatchSubtitle)?.setText(
+            if (cocoonAvailable) R.string.cocoon_match_switch_subtitle else R.string.cocoon_match_not_installed
+        )
+        findViewById<MaterialButton>(R.id.thorPurpleButton)?.setText(
+            if (SuggestionStore.hasThorPurple(prefs)) R.string.thor_purple_remove_button
+            else R.string.thor_purple_apply_button
+        )
+    }
+
+    /**
+     * One automatic offer per resume at most, never before the first-launch
+     * alert is acknowledged. Each offer marks itself shown before it appears,
+     * so dismissing it never brings it back for the same emulators.
+     */
+    private fun maybeOfferSuggestions() {
+        if (isFinishing || isDestroyed) return
+        if (!prefs.getBoolean(PREF_FIRST_LAUNCH_ALERT_SHOWN, false)) return
+        if (SuggestionStore.pendingSwitchOffer(this, prefs).isNotEmpty()) {
+            offerSwitchProfile(fromSettings = false)
+            return
+        }
+        if (!SuggestionStore.cocoonPromptShown(prefs) &&
+            !SuggestionStore.cocoonMatchEnabled(prefs) &&
+            CocoonTheme.isInstalled(this)
+        ) {
+            offerCocoonMatch()
+        }
+    }
+
+    private fun offerSwitchProfile(fromSettings: Boolean) {
+        val detected = SwitchEmulators.installed(this)
+        if (detected.isEmpty()) {
+            if (fromSettings) Toast.makeText(this, R.string.switch_profile_none_found, Toast.LENGTH_LONG).show()
+            return
+        }
+        val packages = detected.map { it.packageName }
+        val names = detected.joinToString { it.displayName }
+        val plan = SuggestionStore.planSwitch(prefs, packages)
+        if (!fromSettings) SuggestionStore.markSwitchOffered(prefs, packages)
+        if (!plan.hasWork) {
+            if (fromSettings) {
+                Toast.makeText(this, getString(R.string.switch_profile_nothing, names), Toast.LENGTH_LONG).show()
+            }
+            return
+        }
+
+        val body = buildString {
+            append(
+                getString(
+                    if (plan.createPreset) R.string.switch_profile_body_create else R.string.switch_profile_body_update,
+                    plan.presetName
+                )
+            )
+            if (!appProfileManager.isEnabled) append(getString(R.string.switch_profile_body_enable))
+            if (plan.conflicts.isNotEmpty()) {
+                append(
+                    getString(
+                        R.string.switch_profile_body_conflicts,
+                        plan.conflicts.keys.joinToString { SwitchEmulators.displayName(it) }
+                    )
+                )
+            }
+        }
+
+        BifrostAlertDialog().show(
+            activity = this,
+            title = getString(R.string.switch_profile_title),
+            subtitle = getString(R.string.switch_profile_subtitle, names),
+            body = body,
+            positiveLabelResId = R.string.suggest_yes,
+            negativeLabelResId = if (fromSettings) R.string.suggest_cancel else R.string.suggest_not_now,
+            cancelable = true,
+            onConfirm = {
+                if (plan.conflicts.isEmpty()) applySwitchProfile(packages, remapConflicts = false)
+                else askSwitchConflicts(packages, plan)
+            },
+            neutralLabelResId = if (fromSettings) null else R.string.suggest_dont_ask,
+            onNeutral = { SuggestionStore.setSwitchPromptDisabled(prefs, true) }
+        )
+    }
+
+    private fun askSwitchConflicts(packages: List<String>, plan: SwitchProfilePlan.Plan) {
+        val lines = plan.conflicts.entries.joinToString("\n") { (pkg, preset) ->
+            "• ${SwitchEmulators.displayName(pkg)} → $preset"
+        }
+        BifrostAlertDialog().show(
+            activity = this,
+            title = getString(R.string.switch_profile_conflict_title),
+            subtitle = null,
+            body = getString(R.string.switch_profile_conflict_body, lines, plan.presetName),
+            positiveLabelResId = R.string.switch_profile_conflict_confirm,
+            negativeLabelResId = R.string.switch_profile_conflict_keep,
+            cancelable = false,
+            onConfirm = { applySwitchProfile(packages, remapConflicts = true) },
+            onCancel = { applySwitchProfile(packages, remapConflicts = false) }
+        )
+    }
+
+    private fun applySwitchProfile(packages: List<String>, remapConflicts: Boolean) {
+        val outcome = SuggestionStore.applySwitch(prefs, packages, remapConflicts)
+        afterSuggestionPresetsChanged()
+        val mapped = packages.count { outcome.mappings[it] == outcome.presetName }
+        Toast.makeText(
+            this,
+            getString(R.string.switch_profile_done, mapped, outcome.presetName),
+            Toast.LENGTH_LONG
+        ).show()
+        if (!appProfileManager.isEnabled) {
+            // Same path as the toggle: asks for usage access when missing.
+            handleAppProfileToggleChange(true)
+        } else {
+            requestAppProfileRefresh()
+        }
+    }
+
+    private fun confirmRemoveSwitchProfile() {
+        val name = SuggestionStore.presets(prefs).let { presets ->
+            (0 until presets.length()).mapNotNull { presets.optJSONObject(it) }
+                .firstOrNull { it.optString("ownerPackage") == SwitchProfilePlan.OWNER }
+                ?.optString("name")
+        } ?: return updateSuggestionSettingsUi()
+        BifrostAlertDialog().show(
+            activity = this,
+            title = getString(R.string.switch_profile_remove_title),
+            subtitle = null,
+            body = getString(R.string.switch_profile_remove_body, name),
+            positiveLabelResId = R.string.suggest_remove,
+            negativeLabelResId = R.string.suggest_cancel,
+            cancelable = true,
+            onConfirm = {
+                SuggestionStore.removeSwitch(prefs)
+                afterSuggestionPresetsChanged()
+                requestAppProfileRefresh()
+                Toast.makeText(this, R.string.switch_profile_removed, Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    private fun offerCocoonMatch() {
+        SuggestionStore.markCocoonPromptShown(prefs)
+        BifrostAlertDialog().show(
+            activity = this,
+            title = getString(R.string.cocoon_match_title),
+            subtitle = getString(R.string.cocoon_match_subtitle),
+            body = getString(R.string.cocoon_match_body),
+            positiveLabelResId = R.string.suggest_yes,
+            negativeLabelResId = R.string.suggest_not_now,
+            cancelable = true,
+            onConfirm = { setCocoonMatch(true) }
+        )
+    }
+
+    private fun setCocoonMatch(enabled: Boolean) {
+        if (enabled) {
+            if (SuggestionStore.enableCocoonMatch(this, prefs) == null) {
+                Toast.makeText(this, R.string.cocoon_match_unavailable, Toast.LENGTH_LONG).show()
+                updateSuggestionSettingsUi()
+                return
+            }
+            Toast.makeText(this, R.string.cocoon_match_enabled, Toast.LENGTH_SHORT).show()
+        } else {
+            SuggestionStore.disableCocoonMatch(prefs)
+        }
+        applyThemeFromPrefs()
+        afterSuggestionPresetsChanged()
+        requestAppProfileRefresh()
+    }
+
+    private fun toggleThorPurple() {
+        if (SuggestionStore.hasThorPurple(prefs)) {
+            SuggestionStore.removeThorPurple(prefs)
+            applyThemeFromPrefs()
+            afterSuggestionPresetsChanged()
+            requestAppProfileRefresh()
+            Toast.makeText(this, R.string.thor_purple_removed, Toast.LENGTH_SHORT).show()
+            return
+        }
+        BifrostAlertDialog().show(
+            activity = this,
+            title = getString(R.string.thor_purple_title),
+            subtitle = null,
+            body = getString(R.string.thor_purple_body),
+            positiveLabelResId = R.string.suggest_yes,
+            negativeLabelResId = R.string.suggest_cancel,
+            cancelable = true,
+            onConfirm = {
+                SuggestionStore.applyThorPurple(prefs)
+                applyThemeFromPrefs()
+                afterSuggestionPresetsChanged()
+                Toast.makeText(this, R.string.thor_purple_applied, Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    /** Same refresh as onResume after presets were written to prefs elsewhere. */
+    private fun afterSuggestionPresetsChanged() {
+        if (::presetController.isInitialized) presetController.reloadFromPrefs()
+        refreshCoverFlowFromPresets()
+        updateSuggestionSettingsUi()
+    }
+
+    private fun requestAppProfileRefresh() {
+        if (appProfileManager.isEnabled && LEDService.isRunning && !serviceController.isServiceTransitioning) {
+            appProfileManager.resetLastForegroundPackage()
+            requestImmediateAppProfileResolution()
+        }
     }
 
     private fun resolveStringByName(resourceName: String, fallback: String): String {

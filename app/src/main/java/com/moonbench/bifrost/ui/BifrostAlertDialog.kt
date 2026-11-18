@@ -20,7 +20,9 @@ class BifrostAlertDialog {
         negativeLabelResId: Int?,
         cancelable: Boolean,
         onConfirm: () -> Unit,
-        onCancel: () -> Unit = {}
+        onCancel: () -> Unit = {},
+        neutralLabelResId: Int? = null,
+        onNeutral: () -> Unit = {}
     ) {
         // The AYN launcher can destroy/recreate MainActivity between a posted
         // callback being scheduled and run (it relaunches across display 4 → 0),
@@ -59,6 +61,10 @@ class BifrostAlertDialog {
 
         if (negativeLabelResId != null) {
             builder.setNegativeButton(negativeLabelResId) { _, _ -> onCancel() }
+        }
+
+        if (neutralLabelResId != null) {
+            builder.setNeutralButton(neutralLabelResId) { _, _ -> onNeutral() }
         }
 
         val dialog = builder.create()
