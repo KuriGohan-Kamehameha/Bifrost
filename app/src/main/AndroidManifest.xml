@@ -10,6 +10,12 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Revive after a crash: an exact allow-while-idle alarm is one of the
+         few background contexts allowed to start a foreground service on
+         Android 12+. Pre-granted on Android 13; the user grants it on 14+
+         ("Alarms & reminders"). Without it Bifrost falls back to a
+         notification with a Restart action. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
     <!-- Keep the LED pipeline warm while a PIPBOY override is active so the
          first action after idle isn't delayed by CPU power-down. -->
@@ -129,6 +135,20 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".revive.ReviveReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.moonbench.bifrost.action.REVIVE_SERVICE" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".revive.ReviveWatchdogJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
 
         <receiver
             android:name=".receivers.ScheduleReceiver"
