@@ -312,7 +312,8 @@ class AppProfileManager(private val prefs: SharedPreferences) {
         return null
     }
 
-    private fun loadPresetByName(name: String): LedPreset? {
+    /** The saved preset called [name] (exact match), or null. Also used by the external API. */
+    fun loadPresetByName(name: String): LedPreset? {
         val json = prefs.getString("presets_json", null) ?: return null
         val array = runCatching { JSONArray(json) }.getOrNull() ?: return null
 

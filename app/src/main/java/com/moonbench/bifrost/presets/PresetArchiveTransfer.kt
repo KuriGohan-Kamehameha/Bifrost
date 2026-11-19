@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.CancellationSignal
 import com.moonbench.bifrost.animations.FadeTransitionAnimation
 import com.moonbench.bifrost.animations.LedAnimationType
+import com.moonbench.bifrost.plugins.ExternalGrant
 import com.moonbench.bifrost.plugins.LivePolicy
 import com.moonbench.bifrost.tools.PerformanceProfile
 import org.json.JSONArray
@@ -20,6 +21,8 @@ object PresetArchiveTransfer {
     // v2 adds the optional generic `livePolicies` block (effect name → LivePolicy).
     // Older Bifrost reads a v2 bundle fine — it imports the presets and ignores
     // the block it doesn't know; newer Bifrost reads a v1 bundle fine — no block.
+    // The optional `externalAccess` block (plugin bundles only, never written
+    // by export) is additive in the same way, so it needs no version bump.
     private const val ARCHIVE_VERSION = 2
     private const val MANIFEST_ENTRY_NAME = "manifest.json"
     private const val ICONS_DIR_PREFIX = "icons/"
@@ -37,7 +40,10 @@ object PresetArchiveTransfer {
         val errors: List<String>,
         // Generic plugin live-feed policies (caller package → policy). Empty for
         // ordinary user preset bundles; populated by plugins that declare them.
-        val livePolicies: Map<String, LivePolicy> = emptyMap()
+        val livePolicies: Map<String, LivePolicy> = emptyMap(),
+        // Plugin-declared external-API grants (app package → grant). Empty for
+        // ordinary user preset bundles. See ExternalGrant.
+        val externalGrants: Map<String, ExternalGrant> = emptyMap()
     )
 
     fun exportToUri(
@@ -194,13 +200,15 @@ object PresetArchiveTransfer {
 
         val mappings = parseMappings(context, manifest.optJSONObject("appProfileMappings"), warnings, cancelSignal)
         val livePolicies = parseLivePolicies(manifest.optJSONObject("livePolicies"), warnings)
+        val externalGrants = ExternalGrant.parseBlock(manifest.optJSONObject("externalAccess"), warnings)
 
         return ImportResult(
             presets = importedPresets,
             mappings = mappings,
             warnings = warnings,
             errors = errors,
-            livePolicies = livePolicies
+            livePolicies = livePolicies,
+            externalGrants = externalGrants
         )
     }
 
