@@ -1121,10 +1121,11 @@ class LEDService : Service() {
             mediaProjection = null
             hasLiveProjection = false
         }
-        if (needsMediaProjection(currentAnimationType)) {
+        val interrupted = activeAnimationType ?: resolveEffectiveAnimationType()
+        if (needsMediaProjection(interrupted) && !(mirrorMode && interrupted == LedAnimationType.AMBIENT)) {
             stopCurrentAnimation()
             if (isRunning && !isStopping.get()) {
-                showProjectionPromptNotification(currentAnimationType.supportsAudioSensitivity)
+                showProjectionPromptNotification(interrupted.supportsAudioSensitivity)
                 appProfileManager.forceNextResolution()
             }
         }
@@ -1292,6 +1293,7 @@ class LEDService : Service() {
     private fun cleanupAndStop() {
         if (isStopping.getAndSet(true)) return
         setCaptureBlock(null)
+        dismissProjectionPromptNotification()
         Log.d(TAG, "cleanupAndStop: STOPPING SERVICE")
         runCatching { ServiceRevive.onServiceStopped(this) }
 
@@ -1515,7 +1517,7 @@ class LEDService : Service() {
         ) return effect
         val wantMirror = PluginPrefs.isMirrorScreen(
             PluginPrefs.prefs(this), PluginPrefs.FALLOUT_PLUGIN_ID
-        ) && BifrostAccessibilityService.isEnabled(this)
+        )
         mirrorMode = wantMirror
         if (!wantMirror) return effect
         currentAmbientDisplayId = BifrostAccessibilityService.falloutDisplayId
