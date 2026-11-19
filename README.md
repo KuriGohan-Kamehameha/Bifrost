@@ -2,15 +2,21 @@
 
 ## Continued maintenance
 
-This is the continued-maintenance fork of **[Pollux / MoonBench's Bifrost](https://github.com/Pollux-MoonBench/Bifrost)**, maintained by **KuriGohan-Kamehameha** following Pollux's departure from the project. Thank you, Pollux, for creating Bifrost and sharing it under GPLv3.
+This is the canonical maintained fork of **[Pollux / MoonBench's Bifrost](https://github.com/Pollux-MoonBench/Bifrost)**, maintained by **KuriGohan-Kamehameha** following Pollux's departure from the project. Thank you, Pollux, for creating Bifrost and sharing it under GPLv3.
 
 The source incorporates Pollux's final published stable release, **[1.3.1](https://github.com/Pollux-MoonBench/Bifrost/releases/tag/1.3.1)**, together with the existing fork history. Future development and issue reports belong here:
 
 - [Releases and downloads](https://github.com/KuriGohan-Kamehameha/Bifrost/releases)
 - [Report an issue](https://github.com/KuriGohan-Kamehameha/Bifrost/issues)
+- [Install, update, and author LED plugins](PLUGINS.md)
+- [Android companion integration](INTEGRATING.md)
 - [Build, signing, and maintenance guide](MAINTAINING.md)
 
 Importing the source does not publish a new APK. Check each release's notes and channel before installing; older fork beta releases are not builds of this imported source. An APK can update an existing installation only when its signing certificate is compatible. Export your settings/presets before switching distributions; changing the Obtainium URL alone cannot resolve a signing mismatch.
+
+## Service recovery and capture access
+
+Automatic recovery is enabled by default for a running LED service. Bifrost restores the intended session after eligible process deaths. An explicit stop is respected. Three qualifying failures within five minutes pause retries until you restart the service manually. Android may require fresh screen-capture consent after a restart. When reactive lighting pauses for access, tap the status beside the service switch to restore it.
 
 Bifrost is a custom LED controller for the **AYN Thor** handheld (and might work for other handhelds).  
 It provides a collection of LED animations that can run in the background, including:
