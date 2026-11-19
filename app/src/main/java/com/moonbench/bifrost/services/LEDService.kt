@@ -71,6 +71,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 class LEDService : Service() {
 
     companion object {
+        const val CAPTURE_BLOCK = "capture_block"
+        const val BLOCK_ACCESSIBILITY = "accessibility"
+        const val BLOCK_AUDIO = "audio"
+        const val BLOCK_PROJECTION = "projection"
         private const val TAG = "BIBI"
         private const val PREF_KEY_LAST_PRESET = "last_preset_name"
         private const val ACTIVITY_CHECK_INTERVAL_MS = 2000L
@@ -404,6 +408,17 @@ class LEDService : Service() {
                     System.currentTimeMillis() - externalOverrideLastSeenMs > EXTERNAL_LEASE_TIMEOUT_MS) {
                     Log.i(TAG, "activityCheckRunnable: external override lease expired → reverting")
                     revertExternalOverride()
+                }
+                if (resolveEffectiveAnimationType() == LedAnimationType.AMBIENT &&
+                    (mirrorMode || !needsMediaProjection(LedAnimationType.AMBIENT)) &&
+                    !isTransitioning.get()) {
+                    val available = BifrostAccessibilityService.instance != null
+                    if (activeAnimationType == LedAnimationType.AMBIENT && !available) {
+                        stopCurrentAnimation()
+                        setCaptureBlock(BLOCK_ACCESSIBILITY)
+                    } else if (available && prefs.getString(CAPTURE_BLOCK, null) == BLOCK_ACCESSIBILITY) {
+                        restartAnimationForCurrentState(force = true)
+                    }
                 }
                 checkAutoProfileSwitch()
                 val nextDelay = when {
@@ -1276,6 +1291,7 @@ class LEDService : Service() {
 
     private fun cleanupAndStop() {
         if (isStopping.getAndSet(true)) return
+        setCaptureBlock(null)
         Log.d(TAG, "cleanupAndStop: STOPPING SERVICE")
         runCatching { ServiceRevive.onServiceStopped(this) }
 
@@ -1363,7 +1379,7 @@ class LEDService : Service() {
 
         return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("BIFROST is open")
-            .setContentText("Tap to tune")
+            .setContentText(if (prefs.contains(CAPTURE_BLOCK)) "Reactive lighting paused. Tap to restore access." else "Tap to tune")
             .setSubText(resolveNotificationSubText())
             .setSmallIcon(R.drawable.ic_notification_small)
             .setLargeIcon(notificationLargeIcon)
@@ -1442,6 +1458,8 @@ class LEDService : Service() {
                 if (currentBurstWallMs > 0L) animation.setBurst(currentBurstWallMs)
             }
             animation.start()
+            setCaptureBlock(null)
+            dismissProjectionPromptNotification()
             activeAnimationType = type
             if (mirrorMode && type == LedAnimationType.AMBIENT) {
                 mirrorRunningDisplayId = currentAmbientDisplayId
@@ -1825,7 +1843,14 @@ class LEDService : Service() {
         handler.post(runnable)
     }
 
+    private fun setCaptureBlock(reason: String?) {
+        if (prefs.getString(CAPTURE_BLOCK, null) == reason) return
+        prefs.edit().putString(CAPTURE_BLOCK, reason).apply()
+        if (isRunning && !isStopping.get()) updateForegroundNotification()
+    }
+
     private fun showProjectionPromptNotification(needsAudio: Boolean = false) {
+        setCaptureBlock(if (needsAudio) BLOCK_AUDIO else BLOCK_PROJECTION)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
@@ -1899,7 +1924,12 @@ class LEDService : Service() {
             showProjectionPromptNotification(needsAudio = true)
             return null
         }
-        if (needsMediaProjection(type) && !mirrorMode && !hasLiveProjection) {
+        if (type == LedAnimationType.AMBIENT && (mirrorMode || !needsMediaProjection(type)) &&
+            BifrostAccessibilityService.instance == null) {
+            setCaptureBlock(BLOCK_ACCESSIBILITY)
+            return null
+        }
+        if (needsMediaProjection(type) && !(mirrorMode && type == LedAnimationType.AMBIENT) && !hasLiveProjection) {
             showProjectionPromptNotification(type.supportsAudioSensitivity)
             return null
         }
