@@ -73,6 +73,7 @@ import com.moonbench.bifrost.services.LEDService
 import com.moonbench.bifrost.services.LiveWallpaperSettingsManager
 import com.moonbench.bifrost.services.ServiceController
 import com.moonbench.bifrost.services.VideoLiveWallpaperService
+import com.moonbench.bifrost.revive.ReviveSettingsUi
 import com.moonbench.bifrost.tools.CrashReporter
 import com.moonbench.bifrost.tools.DeviceInfo
 import com.moonbench.bifrost.tools.PerformanceProfile
@@ -343,6 +344,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingBackupExportOptions: BackupArchiveTransfer.CategoryOptions? = null
     private var pendingBackupImportOptions: BackupArchiveTransfer.CategoryOptions? = null
     private val liveWallpaperPrefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == LEDService.CAPTURE_BLOCK && isAppInitialized) updateCaptureStatus()
         if (key != "live_wallpaper_is_applied") return@OnSharedPreferenceChangeListener
         if (!isAppInitialized) return@OnSharedPreferenceChangeListener
         runOnUiThread {
@@ -794,6 +796,11 @@ class MainActivity : AppCompatActivity() {
         appProfileManager = AppProfileManager(prefs)
         setupAppProfileFeature()
         setupAutoStartupSwitch()
+        ReviveSettingsUi.bind(
+            this,
+            findViewById(R.id.reviveAfterCrashSwitch),
+            findViewById(R.id.reviveHistoryButton)
+        )
         setupPluggedBatteryOverrideSwitch()
         setupPersistentNotificationSwitch()
         setupAdaptiveBrightnessSwitch()
@@ -2346,12 +2353,32 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun updateCaptureStatus() {
+        val label = findViewById<TextView>(R.id.serviceStatusLabel)
+        val reason = if (LEDService.isRunning) prefs.getString(LEDService.CAPTURE_BLOCK, null) else null
+        label.text = when (reason) {
+            LEDService.BLOCK_ACCESSIBILITY -> "Lighting paused · Enable Bifrost accessibility"
+            LEDService.BLOCK_AUDIO -> "Lighting paused · Restore audio and screen access"
+            LEDService.BLOCK_PROJECTION -> "Lighting paused · Grant screen capture"
+            else -> "CALL HEIMDALL"
+        }
+        label.setOnClickListener(if (reason == null) null else View.OnClickListener {
+            if (reason == LEDService.BLOCK_ACCESSIBILITY) {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            } else {
+                isGrantingProjectionForAppProfile = true
+                requestScreenCapturePermission(reason == LEDService.BLOCK_AUDIO)
+            }
+        })
+    }
+
     override fun onResume() {
         super.onResume()
         if (!isAppInitialized) return
 
         resumeStateSyncRunnable?.let(mainHandler::removeCallbacks)
         resumeStateSyncRunnable = Runnable {
+            updateCaptureStatus()
             if (isAwaitingPermissionResult) {
                 if (LEDService.isRunning) serviceToggle.isChecked = true
                 isAwaitingPermissionResult = false

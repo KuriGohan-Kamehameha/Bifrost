@@ -13,12 +13,17 @@ object CrashReporter {
 
     private const val FILE_NAME = "bifrost-crash.txt"
 
-    fun install(context: Context) {
+    /**
+     * [beforeExit] runs after the report is written and before the platform
+     * handler kills the process (used to arm the service revive safety net).
+     */
+    fun install(context: Context, beforeExit: ((Thread, Throwable) -> Unit)? = null) {
         val appContext = context.applicationContext
         val previous = Thread.getDefaultUncaughtExceptionHandler()
 
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             runCatching { write(appContext, thread, error) }
+            runCatching { beforeExit?.invoke(thread, error) }
             previous?.uncaughtException(thread, error)
         }
     }

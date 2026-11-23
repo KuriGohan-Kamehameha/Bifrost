@@ -1,5 +1,7 @@
 # Integrating with Bifrost
 
+For preset bundles, game mappings, and catalogue releases, see the [plugin guide](PLUGINS.md).
+
 Bifrost exposes a broadcast-based IPC API that lets other apps on the device drive its LEDs — flashing police lights during a car chase, matching the LED colour to a character's health bar, setting a preset for your launcher wallpaper, reacting to in-game events in real time. It is entirely opt-in: the user must enable **"Allow third-party LED control"** in Bifrost settings before any command is accepted.
 
 > **Minimum Bifrost version:** 1.2.0-beta (API v2: the first release containing §16)  
