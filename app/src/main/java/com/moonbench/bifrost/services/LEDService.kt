@@ -543,12 +543,12 @@ class LEDService : Service() {
 
         if (intent.action == ACTION_EXTERNAL_APPLY_PRESET) {
             handleExternalApplyPreset(intent)
-            return START_NOT_STICKY
+            return restartMode()
         }
 
         if (intent.action == ACTION_EXTERNAL_BRIGHTNESS) {
             handleExternalBrightness(intent)
-            return START_NOT_STICKY
+            return restartMode()
         }
 
         allowBackgroundRun = intent.getBooleanExtra(EXTRA_ALLOW_BACKGROUND_RUN, allowBackgroundRun)
