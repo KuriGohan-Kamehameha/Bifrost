@@ -41,6 +41,8 @@
     <string name="perm_control_leds_desc">Allows the app to send LED animations and presets to Bifrost.</string>
 
     <string name="external_api_switch_label">Allow third-party LED control</string>
+    <string name="external_api_privileged_label">Let apps start presets and reactive modes</string>
+    <string name="external_api_privileged_desc">Other apps may also run your saved presets and screen or audio reactive effects, using the capture access you already gave Bifrost. Installed plugins can allow this for their own app only.</string>
 
     <string name="startup_title">Welcome to Bifrost</string>
     <string name="startup_progress_notifications">Step 1/3 - Enable notifications</string>
