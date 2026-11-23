@@ -34,6 +34,13 @@
 
 
     <queries>
+        <!-- Setup suggestions: Switch emulators (keep in sync with
+             suggest/SwitchEmulators.KNOWN) and the Cocoon launcher. -->
+        <package android:name="dev.eden.eden_emulator" />
+        <package android:name="dev.eden.eden_emulator.nightly" />
+        <package android:name="dev.eden.nx2" />
+        <package android:name="dev.igawa6.edenduo" />
+        <package android:name="rip.moth.cocoonshell" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
