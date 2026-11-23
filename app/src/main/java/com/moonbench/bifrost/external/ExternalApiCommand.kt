@@ -11,6 +11,8 @@ sealed class Terminator {
 sealed class ExternalApiCommand {
     abstract val callerPackage: String
     abstract val requestId: String?
+    /** Protocol version the caller declared (1..ExternalApi.API_VERSION). */
+    open val apiVersion: Int get() = ExternalApi.MIN_API_VERSION
 
     data class Display(
         override val callerPackage: String,
@@ -26,12 +28,38 @@ sealed class ExternalApiCommand {
         val priority: Int,
         val phaseSeconds: Float = 0f,
         val flickering: Boolean = false,
-        val burstWallMs: Long = 0L
+        val burstWallMs: Long = 0L,
+        override val apiVersion: Int = ExternalApi.MIN_API_VERSION,
     ) : ExternalApiCommand()
 
     data class Clear(
         override val callerPackage: String,
-        override val requestId: String?
+        override val requestId: String?,
+        override val apiVersion: Int = ExternalApi.MIN_API_VERSION,
+    ) : ExternalApiCommand()
+
+    /** v2: run a saved preset (by exact name) as this caller's override. */
+    data class ApplyPreset(
+        override val callerPackage: String,
+        override val requestId: String?,
+        val presetName: String,
+        val terminator: Terminator,
+        val priority: Int,
+        /** Optional brightness override 0..255; null = the preset's own. */
+        val intensity: Int?,
+        override val apiVersion: Int,
+    ) : ExternalApiCommand()
+
+    /** v2: one ExternalFunction on the caller's own override. */
+    data class Invoke(
+        override val callerPackage: String,
+        override val requestId: String?,
+        val function: ExternalFunction,
+        val intensity: Int,
+        val pulseKind: String,
+        val terminator: Terminator,
+        val priority: Int,
+        override val apiVersion: Int,
     ) : ExternalApiCommand()
 
     data class InstallProfile(
@@ -65,4 +93,16 @@ sealed class ExternalApiCommand {
         override val requestId: String?,
         val profileName: String
     ) : ExternalApiCommand()
+}
+
+enum class ExternalFunction(val wireName: String) {
+    BRIGHTNESS(ExternalApi.FUNCTION_BRIGHTNESS),
+    PULSE(ExternalApi.FUNCTION_PULSE),
+    PAUSE(ExternalApi.FUNCTION_PAUSE),
+    RESUME(ExternalApi.FUNCTION_RESUME);
+
+    companion object {
+        fun fromWire(value: String?): ExternalFunction? =
+            values().firstOrNull { it.wireName == value }
+    }
 }

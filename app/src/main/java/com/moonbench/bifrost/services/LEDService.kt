@@ -59,8 +59,11 @@ import com.moonbench.bifrost.animations.RaveAnimation
 import com.moonbench.bifrost.animations.SparkleAnimation
 import com.moonbench.bifrost.animations.StaticAnimation
 import com.moonbench.bifrost.animations.StrobeAnimation
+import com.moonbench.bifrost.external.ExternalCapture
 import com.moonbench.bifrost.external.ExternalOverrideState
 import com.moonbench.bifrost.external.Terminator
+import com.moonbench.bifrost.revive.ReviveStore
+import com.moonbench.bifrost.revive.ServiceRevive
 import com.moonbench.bifrost.tools.Crossfade
 import com.moonbench.bifrost.tools.LedController
 import com.moonbench.bifrost.tools.PerformanceProfile
@@ -69,6 +72,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 class LEDService : Service() {
 
     companion object {
+        const val CAPTURE_BLOCK = "capture_block"
+        const val BLOCK_ACCESSIBILITY = "accessibility"
+        const val BLOCK_AUDIO = "audio"
+        const val BLOCK_PROJECTION = "projection"
         private const val TAG = "BIBI"
         private const val PREF_KEY_LAST_PRESET = "last_preset_name"
         private const val ACTIVITY_CHECK_INTERVAL_MS = 2000L
@@ -104,6 +111,9 @@ class LEDService : Service() {
         const val ACTION_EXTERNAL_DISPLAY = "com.moonbench.bifrost.EXTERNAL_DISPLAY"
         const val ACTION_EXTERNAL_CLEAR = "com.moonbench.bifrost.EXTERNAL_CLEAR"
         const val ACTION_EXTERNAL_PULSE = "com.moonbench.bifrost.EXTERNAL_PULSE"
+        const val ACTION_EXTERNAL_APPLY_PRESET = "com.moonbench.bifrost.EXTERNAL_APPLY_PRESET"
+        const val ACTION_EXTERNAL_BRIGHTNESS = "com.moonbench.bifrost.EXTERNAL_BRIGHTNESS"
+        const val EXTRA_EXTERNAL_PRESET_NAME = "external.presetName"
         const val EXTRA_EXTERNAL_PULSE_KIND = "external.pulseKind"
         const val EXTRA_ALLOW_BACKGROUND_RUN = "allowBackgroundRun"
         const val EXTRA_BATTERY_OVERRIDE_WHEN_PLUGGED = "batteryOverrideWhenPlugged"
@@ -157,6 +167,22 @@ class LEDService : Service() {
         const val DEFAULT_AMBILIGHT_USE_MEDIA_PROJECTION = true
         var isRunning = false
         @Volatile var hasLiveProjection = false
+            private set
+
+        /** An unconsumed MediaProjection consent grant is held (single-use;
+         *  consumed when a capture effect next starts). */
+        @Volatile
+        private var hasPendingProjectionGrant: Boolean = false
+
+        /** A capture effect can start without a new consent prompt: either a
+         *  live capture session or an unconsumed grant. Read by the external API
+         *  receiver (same process) to refuse capture effects it can't start. */
+        val hasProjectionCapture: Boolean
+            get() = hasLiveProjection || hasPendingProjectionGrant
+
+        /** Caller package owning the active external override, or null. */
+        @Volatile
+        var activeExternalOwner: String? = null
             private set
     }
 
@@ -215,7 +241,9 @@ class LEDService : Service() {
     private var mirrorRunningDisplayId = Display.INVALID_DISPLAY
     private var activeAnimationType: LedAnimationType? = null
     private var lastProjectionResultCode: Int = Activity.RESULT_OK
+        set(value) { field = value; publishProjectionState() }
     private var lastProjectionData: Intent? = null
+        set(value) { field = value; publishProjectionState() }
     private var isDevicePluggedIn: Boolean = false
     private var batteryLevelPercent: Int = 100
     private var isLowBatteryAlertActive: Boolean = false
@@ -226,6 +254,7 @@ class LEDService : Service() {
     private var isAppProfileSuppressed: Boolean = false
 
     private var activeExternalOverride: ExternalOverrideState? = null
+        set(value) { field = value; activeExternalOwner = value?.callerPackage }
     private var externalOverrideLastSeenMs: Long = 0L   // lease renewal timestamp
 
     // Generic plugin live-feed policy in effect for the active external override
@@ -248,7 +277,28 @@ class LEDService : Service() {
         val smoothness: Float,
         val sensitivity: Float,
         val isAppProfileSuppressed: Boolean,
+        // A preset override (ACTION_APPLY_PRESET) replaces the whole preset
+        // state, so the rest of it is saved too and restored on revert.
+        val profile: PerformanceProfile,
+        val saturationBoost: Float,
+        val useCustomSampling: Boolean,
+        val useSingleColor: Boolean,
+        val fadeEndColor: Int,
+        val fadeEndRightColor: Int,
+        val breatheWhenCharging: Boolean,
+        val indicateChargingSpeed: Boolean,
+        val flashWhenReady: Boolean,
+        val batteryLowColorOverride: Int?,
+        val batteryMidColorOverride: Int?,
+        val batteryHighColorOverride: Int?,
+        val cpuCoolColorOverride: Int?,
+        val cpuWarmColorOverride: Int?,
+        val cpuHotColorOverride: Int?,
     )
+
+    private fun publishProjectionState() {
+        hasPendingProjectionGrant = lastProjectionResultCode == Activity.RESULT_OK && lastProjectionData != null
+    }
 
     /**
      * Maps the current system screen brightness (0–255) to an LED brightness multiplier.
@@ -371,6 +421,18 @@ class LEDService : Service() {
         getSharedPreferences("bifrost_prefs", MODE_PRIVATE)
     }
 
+    private val reviveStore by lazy { ReviveStore(this) }
+
+    // Set when a revive could not be promoted to the foreground and has been
+    // handed to the alarm path: this stop must not clear "should be running".
+    private var keepReviveIntentOnDestroy = false
+
+    // Decoded once: every foreground-notification refresh used to decode the
+    // launcher artwork into a fresh bitmap.
+    private val notificationLargeIcon by lazy {
+        BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher_foreground)
+    }
+
     private val appProfileManager by lazy {
         AppProfileManager(prefs)
     }
@@ -391,6 +453,17 @@ class LEDService : Service() {
                     Log.i(TAG, "activityCheckRunnable: external override lease expired → reverting")
                     revertExternalOverride()
                 }
+                if (resolveEffectiveAnimationType() == LedAnimationType.AMBIENT &&
+                    (mirrorMode || !needsMediaProjection(LedAnimationType.AMBIENT)) &&
+                    !isTransitioning.get()) {
+                    val available = BifrostAccessibilityService.instance != null
+                    if (activeAnimationType == LedAnimationType.AMBIENT && !available) {
+                        stopCurrentAnimation()
+                        setCaptureBlock(BLOCK_ACCESSIBILITY)
+                    } else if (available && prefs.getString(CAPTURE_BLOCK, null) == BLOCK_ACCESSIBILITY) {
+                        restartAnimationForCurrentState(force = true)
+                    }
+                }
                 checkAutoProfileSwitch()
                 val nextDelay = when {
                     // A live override is polled tightly so a stale lease is caught
@@ -406,6 +479,8 @@ class LEDService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        publishProjectionState()
+        activeExternalOwner = null
         createNotificationChannel()
         mediaProjectionManager = getSystemService(MediaProjectionManager::class.java)
         ledController = LedController()
@@ -417,8 +492,9 @@ class LEDService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) {
-            stopSelf()
-            return START_NOT_STICKY
+            // Android restarting the sticky service after its process died
+            // (low-memory kill, crash). Restore the saved request, or stop.
+            return handleSystemRestart(flags, startId)
         }
 
         if (intent.action == ACTION_STOP) {
@@ -428,7 +504,8 @@ class LEDService : Service() {
 
         if (intent.action == ACTION_UPDATE_PARAMS) {
             handleUpdateParams(intent)
-            return START_NOT_STICKY
+            if (isRunning) ServiceRevive.onParamsUpdated(this, intent)
+            return restartMode()
         }
 
         if (intent.action == ACTION_FORCE_APP_PROFILE_RESOLUTION) {
@@ -436,27 +513,42 @@ class LEDService : Service() {
             if (isRunning) {
                 checkAutoProfileSwitch()
             }
-            return START_NOT_STICKY
+            return restartMode()
         }
 
         if (intent.action == ACTION_SUPPLY_PROJECTION) {
             handleSupplyProjection(intent)
-            return START_NOT_STICKY
+            return restartMode()
         }
 
         if (intent.action == ACTION_EXTERNAL_DISPLAY) {
             handleExternalDisplay(intent)
-            return START_NOT_STICKY
+            return restartMode()
         }
 
         if (intent.action == ACTION_EXTERNAL_CLEAR) {
             handleExternalClear(intent.getStringExtra(EXTRA_EXTERNAL_CALLER_PACKAGE))
-            return START_NOT_STICKY
+            return restartMode()
         }
 
         if (intent.action == ACTION_EXTERNAL_PULSE) {
             handleExternalPulse(intent.getStringExtra(EXTRA_EXTERNAL_PULSE_KIND))
-            return START_NOT_STICKY
+            return restartMode()
+        }
+
+        if (ServiceRevive.isReviveIntent(intent) && isRunning) {
+            // The sticky restart and the safety-net alarm raced; one revive is enough.
+            return restartMode()
+        }
+
+        if (intent.action == ACTION_EXTERNAL_APPLY_PRESET) {
+            handleExternalApplyPreset(intent)
+            return restartMode()
+        }
+
+        if (intent.action == ACTION_EXTERNAL_BRIGHTNESS) {
+            handleExternalBrightness(intent)
+            return restartMode()
         }
 
         allowBackgroundRun = intent.getBooleanExtra(EXTRA_ALLOW_BACKGROUND_RUN, allowBackgroundRun)
@@ -486,9 +578,21 @@ class LEDService : Service() {
         )
 
         acceptProjectionGrant(intent)
-        startForegroundSafely(createNotification())
+        try {
+            startForegroundSafely(createNotification())
+        } catch (e: IllegalStateException) {
+            // ForegroundServiceStartNotAllowedException: Android 12+ refused to
+            // promote a background revive. Hand it to the exempt alarm path.
+            if (!ServiceRevive.isReviveIntent(intent)) throw e
+            keepReviveIntentOnDestroy = true
+            ServiceRevive.onReviveBlocked(this, intent, e)
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         isRunning = true
+        keepReviveIntentOnDestroy = false
+        ServiceRevive.onServiceStarted(this, intent)
         BifrostTileService.refreshFrom(this)
 
         val animationTypeName = intent.getStringExtra("animationType")
@@ -555,7 +659,27 @@ class LEDService : Service() {
             restartAnimationForCurrentState(force = true)
         }
 
-        return START_NOT_STICKY
+        return restartMode()
+    }
+
+    /**
+     * Sticky while the service is meant to run, so Android restarts it after a
+     * low-memory kill or crash; not sticky once it is stopping or the user has
+     * turned automatic revive off.
+     */
+    private fun restartMode(): Int =
+        if (isRunning && !isStopping.get() && reviveStore.isEnabled) START_STICKY else START_NOT_STICKY
+
+    private fun handleSystemRestart(flags: Int, startId: Int): Int {
+        if (isRunning) return restartMode()
+        val reviveIntent = ServiceRevive.prepareRevive(this, running = false, source = ServiceRevive.SOURCE_STICKY)
+        if (reviveIntent == null) {
+            Log.i(TAG, "handleSystemRestart: not reviving")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        Log.i(TAG, "handleSystemRestart: reviving the saved preset")
+        return onStartCommand(reviveIntent, flags, startId)
     }
 
     private fun handleUpdateParams(intent: Intent) {
@@ -1053,10 +1177,11 @@ class LEDService : Service() {
             mediaProjection = null
             hasLiveProjection = false
         }
-        if (needsMediaProjection(currentAnimationType)) {
+        val interrupted = activeAnimationType ?: resolveEffectiveAnimationType()
+        if (needsMediaProjection(interrupted) && !(mirrorMode && interrupted == LedAnimationType.AMBIENT)) {
             stopCurrentAnimation()
             if (isRunning && !isStopping.get()) {
-                showProjectionPromptNotification(currentAnimationType.supportsAudioSensitivity)
+                showProjectionPromptNotification(interrupted.supportsAudioSensitivity)
                 appProfileManager.forceNextResolution()
             }
         }
@@ -1187,6 +1312,11 @@ class LEDService : Service() {
         // Destruction must be synchronous. Delayed teardown can otherwise revoke
         // a replacement service's capture or overwrite its shared running state.
         isStopping.set(true)
+        if (!keepReviveIntentOnDestroy) {
+            // Reaching onDestroy means an orderly stop (Stop action, app toggle,
+            // tile, schedule). A killed or crashed process never gets here.
+            runCatching { ServiceRevive.onServiceStopped(this) }
+        }
         handler.removeCallbacksAndMessages(null)
         clearPendingCallbacks()
         isRunning = false
@@ -1199,6 +1329,7 @@ class LEDService : Service() {
         unmountScreenBrightnessObserver()
         runCatching { ledController.shutdown() }
             .onFailure { Log.w(TAG, "LED shutdown failed", it) }
+        activeExternalOwner = null
         BifrostTileService.refreshFrom(this)
         super.onDestroy()
     }
@@ -1218,7 +1349,10 @@ class LEDService : Service() {
 
     private fun cleanupAndStop() {
         if (isStopping.getAndSet(true)) return
+        setCaptureBlock(null)
+        dismissProjectionPromptNotification()
         Log.d(TAG, "cleanupAndStop: STOPPING SERVICE")
+        runCatching { ServiceRevive.onServiceStopped(this) }
 
         try {
             handler.removeCallbacks(activityCheckRunnable)
@@ -1304,10 +1438,10 @@ class LEDService : Service() {
 
         return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("BIFROST is open")
-            .setContentText("Tap to tune")
+            .setContentText(if (prefs.contains(CAPTURE_BLOCK)) "Reactive lighting paused. Tap to restore access." else "Tap to tune")
             .setSubText(resolveNotificationSubText())
             .setSmallIcon(R.drawable.ic_notification_small)
-            .setLargeIcon(BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher_foreground))
+            .setLargeIcon(notificationLargeIcon)
             .setContentIntent(mainPendingIntent)
             .addAction(android.R.drawable.ic_delete, "Stop", stopPendingIntent)
             .setOnlyAlertOnce(true)
@@ -1383,6 +1517,8 @@ class LEDService : Service() {
                 if (currentBurstWallMs > 0L) animation.setBurst(currentBurstWallMs)
             }
             animation.start()
+            setCaptureBlock(null)
+            dismissProjectionPromptNotification()
             activeAnimationType = type
             if (mirrorMode && type == LedAnimationType.AMBIENT) {
                 mirrorRunningDisplayId = currentAmbientDisplayId
@@ -1438,7 +1574,7 @@ class LEDService : Service() {
         ) return effect
         val wantMirror = PluginPrefs.isMirrorScreen(
             PluginPrefs.prefs(this), PluginPrefs.FALLOUT_PLUGIN_ID
-        ) && BifrostAccessibilityService.isEnabled(this)
+        )
         mirrorMode = wantMirror
         if (!wantMirror) return effect
         currentAmbientDisplayId = BifrostAccessibilityService.falloutDisplayId
@@ -1467,7 +1603,7 @@ class LEDService : Service() {
         // JSON, and the feed is per-frame, so we must NOT repeat it every heartbeat.
         // Reuse the cached policy while the same effect stays active; re-resolve only
         // on a fresh or changed override.
-        if (current == null || current.effect != effect) {
+        if (current == null || current.effect != effect || current.presetName != null) {
             currentLivePolicy = LivePolicyStore.forEffect(prefs, effect.name)
         }
         val policy = currentLivePolicy
@@ -1490,6 +1626,7 @@ class LEDService : Service() {
         // start; both sides then advance on real time. A new caller or an
         // effect change falls through to the full snapshot + restart path.
         if (current != null && current.callerPackage == callerPkg &&
+            current.presetName == null &&
             current.effect == effect && activeAnimationType == effect &&
             currentAnimation != null &&
             // In mirror mode, a Pip-Boy move to the other display must restart
@@ -1520,7 +1657,38 @@ class LEDService : Service() {
             return
         }
 
-        val terminator: Terminator = when (intent.getStringExtra(EXTRA_EXTERNAL_TERMINATOR)) {
+        val terminator = readExternalTerminator(intent)
+
+        takeExternalOverride(
+            ExternalOverrideState(
+                callerPackage = callerPkg,
+                effect = effect,
+                color = color,
+                colorRight = rightColor,
+                intensity = intensity,
+                speed = speed,
+                smoothness = smoothness,
+                sensitivity = sensitivity,
+                terminator = terminator,
+                priority = newPriority,
+                startedAtMs = System.currentTimeMillis(),
+            )
+        ) {
+            currentAnimationType = effect
+            currentColor = color
+            currentRightColor = rightColor
+            currentBrightness = intensity
+            currentSpeed = speed
+            currentSmoothness = smoothness
+            currentSensitivity = sensitivity
+            currentPhaseSeconds = intent.getFloatExtra(EXTRA_EXTERNAL_PHASE_SECONDS, 0f).toDouble()
+            currentFlickering = intent.getBooleanExtra(EXTRA_EXTERNAL_FLICKERING, false)
+            currentBurstWallMs = intent.getLongExtra(EXTRA_EXTERNAL_BURST_WALL_MS, 0L)
+        }
+    }
+
+    private fun readExternalTerminator(intent: Intent): Terminator =
+        when (intent.getStringExtra(EXTRA_EXTERNAL_TERMINATOR)) {
             TERMINATOR_DURATION -> Terminator.Duration(
                 intent.getLongExtra(EXTRA_EXTERNAL_DURATION_MS, 0L)
             )
@@ -1528,20 +1696,44 @@ class LEDService : Service() {
             else -> Terminator.UntilNextCommand
         }
 
+    private fun snapshotCurrentState(): ExternalOverrideSnapshot = ExternalOverrideSnapshot(
+        animationType = currentAnimationType,
+        color = currentColor,
+        rightColor = currentRightColor,
+        brightness = currentBrightness,
+        speed = currentSpeed,
+        smoothness = currentSmoothness,
+        sensitivity = currentSensitivity,
+        isAppProfileSuppressed = isAppProfileSuppressed,
+        profile = currentProfile,
+        saturationBoost = currentSaturationBoost,
+        useCustomSampling = currentUseCustomSampling,
+        useSingleColor = currentUseSingleColor,
+        fadeEndColor = currentFadeEndColor,
+        fadeEndRightColor = currentFadeEndRightColor,
+        breatheWhenCharging = currentBreatheWhenCharging,
+        indicateChargingSpeed = currentIndicateChargingSpeed,
+        flashWhenReady = currentFlashWhenReady,
+        batteryLowColorOverride = currentBatteryLowColorOverride,
+        batteryMidColorOverride = currentBatteryMidColorOverride,
+        batteryHighColorOverride = currentBatteryHighColorOverride,
+        cpuCoolColorOverride = currentCpuCoolColorOverride,
+        cpuWarmColorOverride = currentCpuWarmColorOverride,
+        cpuHotColorOverride = currentCpuHotColorOverride,
+    )
+
+    /**
+     * Common tail of every override start (ACTION_DISPLAY full path and
+     * ACTION_APPLY_PRESET): snapshot on first entry, cancel a revert crossfade,
+     * install [state], let [applyFields] set the render state, arm the
+     * duration expiry, then restart the animation.
+     */
+    private fun takeExternalOverride(state: ExternalOverrideState, applyFields: () -> Unit) {
         // Snapshot the pre-override state only on the first transition in —
         // re-commands from the same or higher-priority caller replay onto the
         // already-captured snapshot.
-        if (current == null) {
-            savedStateBeforeExternalOverride = ExternalOverrideSnapshot(
-                animationType = currentAnimationType,
-                color = currentColor,
-                rightColor = currentRightColor,
-                brightness = currentBrightness,
-                speed = currentSpeed,
-                smoothness = currentSmoothness,
-                sensitivity = currentSensitivity,
-                isAppProfileSuppressed = isAppProfileSuppressed,
-            )
+        if (activeExternalOverride == null) {
+            savedStateBeforeExternalOverride = snapshotCurrentState()
         }
 
         // A fresh override may land mid-crossfade (effect reactivated during the
@@ -1553,34 +1745,13 @@ class LEDService : Service() {
             ledController.setMasterScale(1f)
         }
 
-        activeExternalOverride = ExternalOverrideState(
-            callerPackage = callerPkg,
-            effect = effect,
-            color = color,
-            colorRight = rightColor,
-            intensity = intensity,
-            speed = speed,
-            smoothness = smoothness,
-            sensitivity = sensitivity,
-            terminator = terminator,
-            priority = newPriority,
-            startedAtMs = System.currentTimeMillis(),
-        )
-
-        currentAnimationType = effect
-        currentColor = color
-        currentRightColor = rightColor
-        currentBrightness = intensity
-        currentSpeed = speed
-        currentSmoothness = smoothness
-        currentSensitivity = sensitivity
-        currentPhaseSeconds = intent.getFloatExtra(EXTRA_EXTERNAL_PHASE_SECONDS, 0f).toDouble()
-        currentFlickering = intent.getBooleanExtra(EXTRA_EXTERNAL_FLICKERING, false)
-        currentBurstWallMs = intent.getLongExtra(EXTRA_EXTERNAL_BURST_WALL_MS, 0L)
+        activeExternalOverride = state
+        applyFields()
         isAppProfileSuppressed = false
 
         externalExpiryRunnable?.let(handler::removeCallbacks)
         externalExpiryRunnable = null
+        val terminator = state.terminator
         if (terminator is Terminator.Duration) {
             val expiry = Runnable {
                 externalExpiryRunnable = null
@@ -1595,6 +1766,130 @@ class LEDService : Service() {
             return
         }
         restartAnimationForCurrentState(force = true)
+    }
+
+    /**
+     * ACTION_APPLY_PRESET: run a saved preset as the caller's override. Same
+     * priority, lease and revert rules as ACTION_DISPLAY. The receiver already
+     * checked permission, existence and capture; they're re-checked here
+     * because the preset list or the capture token may change in between.
+     */
+    private fun handleExternalApplyPreset(intent: Intent) {
+        if (!isRunning || isStopping.get()) return
+
+        val callerPkg = intent.getStringExtra(EXTRA_EXTERNAL_CALLER_PACKAGE) ?: return
+        val presetName = intent.getStringExtra(EXTRA_EXTERNAL_PRESET_NAME) ?: return
+        val newPriority = intent.getIntExtra(EXTRA_EXTERNAL_PRIORITY, 50)
+        val current = activeExternalOverride
+        if (current != null && current.callerPackage != callerPkg && current.priority > newPriority) {
+            Log.d(TAG, "handleExternalApplyPreset: preempted — existing override from ${current.callerPackage} priority ${current.priority} > $newPriority from $callerPkg")
+            return
+        }
+
+        val intensityOverride = intent.getIntExtra(EXTRA_EXTERNAL_INTENSITY, -1)
+
+        // Keep-alive: the same caller re-sends the preset it already runs
+        // (heartbeat). Renew the lease, at most adjust brightness — no restart
+        // and no preset lookup. A start still in progress (capture effects take
+        // a few hundred ms) counts as running, so a heartbeat can't restart it.
+        if (current != null && current.callerPackage == callerPkg &&
+            current.presetName == presetName &&
+            (isTransitioning.get() || (activeAnimationType == current.effect && currentAnimation != null))
+        ) {
+            externalOverrideLastSeenMs = System.currentTimeMillis()
+            if (intensityOverride in 0..255 && intensityOverride != currentBrightness) {
+                currentBrightness = intensityOverride
+                currentAnimation?.setTargetBrightness(effectiveBrightness())
+            }
+            return
+        }
+
+        val preset = appProfileManager.loadPresetByName(presetName)
+        if (preset == null) {
+            Log.w(TAG, "handleExternalApplyPreset: no preset named '$presetName'")
+            return
+        }
+        val captureOk = ExternalCapture.isAvailable(
+            preset.animationType,
+            hasProjectionCapture,
+            hasAudioPermission(),
+            BifrostAccessibilityService.instance != null,
+            prefs.getBoolean(PREF_AMBILIGHT_USE_MEDIA_PROJECTION, DEFAULT_AMBILIGHT_USE_MEDIA_PROJECTION)
+        )
+        if (!captureOk) {
+            Log.w(TAG, "handleExternalApplyPreset: '$presetName' needs capture Bifrost doesn't hold — ignored")
+            return
+        }
+        val brightness = if (intensityOverride in 0..255) intensityOverride else preset.brightness
+
+        // Renew the lease on every command from the owner.
+        externalOverrideLastSeenMs = System.currentTimeMillis()
+
+        // Presets are not a live feed: no live-feed policy, no mirror mode.
+        currentLivePolicy = null
+        stableLeftColor = 0
+        stableRightColor = 0
+        mirrorMode = false
+        mirrorRunningDisplayId = Display.INVALID_DISPLAY
+
+        takeExternalOverride(
+            ExternalOverrideState(
+                callerPackage = callerPkg,
+                effect = preset.animationType,
+                color = preset.color,
+                colorRight = preset.rightColor,
+                intensity = brightness,
+                speed = preset.speed,
+                smoothness = preset.smoothness,
+                sensitivity = preset.sensitivity,
+                terminator = readExternalTerminator(intent),
+                priority = newPriority,
+                startedAtMs = System.currentTimeMillis(),
+                presetName = presetName,
+            )
+        ) {
+            currentAnimationType = preset.animationType
+            currentProfile = preset.performanceProfile
+            currentColor = preset.color
+            currentRightColor = preset.rightColor
+            currentFadeEndColor = preset.fadeEndColor
+            currentFadeEndRightColor = preset.fadeEndRightColor
+            currentBrightness = brightness
+            currentSpeed = preset.speed
+            currentSmoothness = preset.smoothness
+            currentSensitivity = preset.sensitivity
+            currentSaturationBoost = preset.saturationBoost
+            currentUseCustomSampling = preset.useCustomSampling
+            currentUseSingleColor = preset.useSingleColor
+            currentBreatheWhenCharging = preset.breatheWhenCharging
+            currentIndicateChargingSpeed = preset.indicateChargingSpeed
+            currentFlashWhenReady = preset.flashWhenReady
+            currentBatteryLowColorOverride = preset.batteryLowColorOverride
+            currentBatteryMidColorOverride = preset.batteryMidColorOverride
+            currentBatteryHighColorOverride = preset.batteryHighColorOverride
+            currentCpuCoolColorOverride = preset.cpuCoolColorOverride
+            currentCpuWarmColorOverride = preset.cpuWarmColorOverride
+            currentCpuHotColorOverride = preset.cpuHotColorOverride
+            currentPhaseSeconds = 0.0
+            currentFlickering = false
+            currentBurstWallMs = 0L
+        }
+    }
+
+    /**
+     * ACTION_INVOKE BRIGHTNESS: change the brightness of the caller's own
+     * running override in place (no restart). Renews the lease.
+     */
+    private fun handleExternalBrightness(intent: Intent) {
+        if (!isRunning || isStopping.get()) return
+        val callerPkg = intent.getStringExtra(EXTRA_EXTERNAL_CALLER_PACKAGE) ?: return
+        val current = activeExternalOverride ?: return
+        if (current.callerPackage != callerPkg) return
+        val intensity = intent.getIntExtra(EXTRA_EXTERNAL_INTENSITY, currentBrightness).coerceIn(0, 255)
+        externalOverrideLastSeenMs = System.currentTimeMillis()
+        currentBrightness = intensity
+        activeExternalOverride = current.copy(intensity = intensity)
+        currentAnimation?.setTargetBrightness(effectiveBrightness())
     }
 
     /**
@@ -1686,6 +1981,21 @@ class LEDService : Service() {
             currentSmoothness = snapshot.smoothness
             currentSensitivity = snapshot.sensitivity
             isAppProfileSuppressed = snapshot.isAppProfileSuppressed
+            currentProfile = snapshot.profile
+            currentSaturationBoost = snapshot.saturationBoost
+            currentUseCustomSampling = snapshot.useCustomSampling
+            currentUseSingleColor = snapshot.useSingleColor
+            currentFadeEndColor = snapshot.fadeEndColor
+            currentFadeEndRightColor = snapshot.fadeEndRightColor
+            currentBreatheWhenCharging = snapshot.breatheWhenCharging
+            currentIndicateChargingSpeed = snapshot.indicateChargingSpeed
+            currentFlashWhenReady = snapshot.flashWhenReady
+            currentBatteryLowColorOverride = snapshot.batteryLowColorOverride
+            currentBatteryMidColorOverride = snapshot.batteryMidColorOverride
+            currentBatteryHighColorOverride = snapshot.batteryHighColorOverride
+            currentCpuCoolColorOverride = snapshot.cpuCoolColorOverride
+            currentCpuWarmColorOverride = snapshot.cpuWarmColorOverride
+            currentCpuHotColorOverride = snapshot.cpuHotColorOverride
         }
 
         if (!isRunning || isStopping.get()) return
@@ -1705,8 +2015,11 @@ class LEDService : Service() {
                 // fallback covers the "suppressed / nothing resolved" gap, and —
                 // crucially — runs even though the override animation is still
                 // non-null, so we never get stuck on the relinquished effect.
-                if (!isAppProfileSuppressed &&
-                    (currentAnimation == null || activeAnimationType == LedAnimationType.PIPBOY)) {
+                // It used to run only for PIPBOY; any override effect (a preset
+                // override, or a STROBE/AMBIENT display) can be left running when
+                // checkForSwitch resolves nothing, so it now always runs. After a
+                // successful switch it only re-posts the same pending start.
+                if (!isAppProfileSuppressed) {
                     restartAnimationForCurrentState(force = true)
                 }
             }
@@ -1766,7 +2079,14 @@ class LEDService : Service() {
         handler.post(runnable)
     }
 
+    private fun setCaptureBlock(reason: String?) {
+        if (prefs.getString(CAPTURE_BLOCK, null) == reason) return
+        prefs.edit().putString(CAPTURE_BLOCK, reason).apply()
+        if (isRunning && !isStopping.get()) updateForegroundNotification()
+    }
+
     private fun showProjectionPromptNotification(needsAudio: Boolean = false) {
+        setCaptureBlock(if (needsAudio) BLOCK_AUDIO else BLOCK_PROJECTION)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
@@ -1790,7 +2110,7 @@ class LEDService : Service() {
 
         val notification = NotificationCompat.Builder(this, PROJECTION_PROMPT_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_small)
-            .setLargeIcon(BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher_foreground))
+            .setLargeIcon(notificationLargeIcon)
             .setContentTitle("Capture permission needed")
             .setContentText("Tap to grant permission so Bifrost can run the assigned animation.")
             .setContentIntent(pendingIntent)
@@ -1840,7 +2160,12 @@ class LEDService : Service() {
             showProjectionPromptNotification(needsAudio = true)
             return null
         }
-        if (needsMediaProjection(type) && !mirrorMode && !hasLiveProjection) {
+        if (type == LedAnimationType.AMBIENT && (mirrorMode || !needsMediaProjection(type)) &&
+            BifrostAccessibilityService.instance == null) {
+            setCaptureBlock(BLOCK_ACCESSIBILITY)
+            return null
+        }
+        if (needsMediaProjection(type) && !(mirrorMode && type == LedAnimationType.AMBIENT) && !hasLiveProjection) {
             showProjectionPromptNotification(type.supportsAudioSensitivity)
             return null
         }

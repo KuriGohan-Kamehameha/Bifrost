@@ -14,4 +14,6 @@ data class ExternalOverrideState(
     val terminator: Terminator,
     val priority: Int,
     val startedAtMs: Long,
+    /** Set when the override runs a saved preset (ACTION_APPLY_PRESET). */
+    val presetName: String? = null,
 )

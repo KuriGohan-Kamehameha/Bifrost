@@ -73,6 +73,7 @@ import com.moonbench.bifrost.services.LEDService
 import com.moonbench.bifrost.services.LiveWallpaperSettingsManager
 import com.moonbench.bifrost.services.ServiceController
 import com.moonbench.bifrost.services.VideoLiveWallpaperService
+import com.moonbench.bifrost.revive.ReviveSettingsUi
 import com.moonbench.bifrost.tools.CrashReporter
 import com.moonbench.bifrost.tools.DeviceInfo
 import com.moonbench.bifrost.tools.PerformanceProfile
@@ -112,6 +113,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var lowBatteryAlertValueText: TextView
     private lateinit var disableLowBatteryAlertWhileChargingSwitch: SwitchMaterial
     private lateinit var externalApiSwitch: SwitchMaterial
+    private lateinit var externalApiPrivilegedSwitch: SwitchMaterial
     private lateinit var mediaProjectionManager: MediaProjectionManager
     private lateinit var animationSpinner: Spinner
     private lateinit var profileSpinner: Spinner
@@ -346,6 +348,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingBackupExportOptions: BackupArchiveTransfer.CategoryOptions? = null
     private var pendingBackupImportOptions: BackupArchiveTransfer.CategoryOptions? = null
     private val liveWallpaperPrefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == LEDService.CAPTURE_BLOCK && isAppInitialized) updateCaptureStatus()
         if (key != "live_wallpaper_is_applied") return@OnSharedPreferenceChangeListener
         if (!isAppInitialized) return@OnSharedPreferenceChangeListener
         runOnUiThread {
@@ -713,6 +716,7 @@ class MainActivity : AppCompatActivity() {
             R.id.disableLowBatteryAlertWhileChargingSwitch
         )
         externalApiSwitch = findViewById(R.id.externalApiSwitch)
+        externalApiPrivilegedSwitch = findViewById(R.id.externalApiPrivilegedSwitch)
         animationSpinner = findViewById(R.id.animationSpinner)
         profileSpinner = findViewById(R.id.profileSpinner)
         presetSpinner = findViewById(R.id.presetSpinner)
@@ -800,6 +804,11 @@ class MainActivity : AppCompatActivity() {
         appProfileManager = AppProfileManager(prefs)
         setupAppProfileFeature()
         setupAutoStartupSwitch()
+        ReviveSettingsUi.bind(
+            this,
+            findViewById(R.id.reviveAfterCrashSwitch),
+            findViewById(R.id.reviveHistoryButton)
+        )
         setupPluggedBatteryOverrideSwitch()
         setupPersistentNotificationSwitch()
         setupAdaptiveBrightnessSwitch()
@@ -2353,12 +2362,32 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun updateCaptureStatus() {
+        val label = findViewById<TextView>(R.id.serviceStatusLabel)
+        val reason = if (LEDService.isRunning) prefs.getString(LEDService.CAPTURE_BLOCK, null) else null
+        label.text = when (reason) {
+            LEDService.BLOCK_ACCESSIBILITY -> "Lighting paused · Enable Bifrost accessibility"
+            LEDService.BLOCK_AUDIO -> "Lighting paused · Restore audio and screen access"
+            LEDService.BLOCK_PROJECTION -> "Lighting paused · Grant screen capture"
+            else -> "CALL HEIMDALL"
+        }
+        label.setOnClickListener(if (reason == null) null else View.OnClickListener {
+            if (reason == LEDService.BLOCK_ACCESSIBILITY) {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            } else {
+                isGrantingProjectionForAppProfile = true
+                requestScreenCapturePermission(reason == LEDService.BLOCK_AUDIO)
+            }
+        })
+    }
+
     override fun onResume() {
         super.onResume()
         if (!isAppInitialized) return
 
         resumeStateSyncRunnable?.let(mainHandler::removeCallbacks)
         resumeStateSyncRunnable = Runnable {
+            updateCaptureStatus()
             if (isAwaitingPermissionResult) {
                 if (LEDService.isRunning) serviceToggle.isChecked = true
                 isAwaitingPermissionResult = false
@@ -3173,8 +3202,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupExternalApiSwitch() {
         externalApiSwitch.isChecked = ExternalApiGate.isMasterEnabled(prefs)
+        // The presets/reactive switch only means something under the master
+        // switch; it keeps its own value but is greyed out while that is off.
+        externalApiPrivilegedSwitch.isChecked = ExternalApiGate.isPrivilegedEnabled(prefs)
+        externalApiPrivilegedSwitch.isEnabled = externalApiSwitch.isChecked
+        externalApiPrivilegedSwitch.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean(ExternalApiGate.PREF_PRIVILEGED_ENABLED, isChecked).apply()
+        }
         externalApiSwitch.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(ExternalApiGate.PREF_ENABLED, isChecked).apply()
+            externalApiPrivilegedSwitch.isEnabled = isChecked
             // Enabling requires the service to survive activity close, so next
             // start picks up the OR'd allowBackgroundRun. If running, restart
             // so the new flag takes effect without waiting for the user to
